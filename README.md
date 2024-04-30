@@ -37,5 +37,5 @@ More information and the source code is coming soon.
 Preprint
 --------
 
-* Ruijie Meng, Gregory J. Duck, Abhik Roychoudhury, [*Program Environment * Fuzzing*](https://arxiv.org/abs/2404.13951), 2024
+* Ruijie Meng, Gregory J. Duck, Abhik Roychoudhury, [*Program Environment Fuzzing*](https://arxiv.org/abs/2404.13951), 2024
 
