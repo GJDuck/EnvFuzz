@@ -22,21 +22,18 @@ using EFuzz:
      style="width: 85%;">
 </p>
 
-Demo of EFuzz fuzzing a GUI application binary (`gnome-calculator`).
+[*Demo of EFuzz fuzzing a GUI application binary (`gnome-calculator`).
 First, the app is run normally, and all environmental interactions (including
 user inputs) are recorded to a file.
 Next, the app is fuzzed, this time by repeatedly replaying the original
 recording but with one or mutations applied.
-EFuzz quickly finds several crashes, as highlighted in red.
+EFuzz quickly finds several crashes, as highlighted in red.*]
 
 ---
 
 Unlike existing fuzzers, which only fuzz a specific input source (like AFL),
 EFuzz fuzzes the **entire interaction** between the subject and its
-environment (&#x3B5;).
-In other words, the environment (&#x3B5;) itself is the fuzz target---a.k.a.
-*program environment fuzzing*.
-Here, the environment includes all files (configuration, cache, resource,
+environment (&#x3B5;)---including all files (configuration, cache, resource,
 fonts, etc.), sockets (session manager, accessibility service, name service,
 etc.), user interactions via the windowing system (mouse movements, button
 clicks, etc.), special files, devices, and standard streams, as illustrated
@@ -48,14 +45,14 @@ below:
      style="width: 60%;">
 </p>
 
-Basically all inputs---regardless of source or type---are considered to be
-part of the environment, and will be fuzzed by EFuzz.
+In other words, EFuzz considers the entire environment (&#x3B5;) itself is
+the fuzz target---a.k.a.  *program environment fuzzing*.
 This even includes user interactions via the windowing system, which are
 treated as just another input source, no different than any other socket or
 file.
-This makes EFuzz very comprehensive, as it will automatically fuzz all inputs
-and combinations of inputs, even obscure inputs that are normally overlooked
-in a typical fuzz campaign.
+This makes EFuzz a very comprehensive fuzzer, as it will automatically fuzz
+all inputs (and input combinations), even obscure inputs that are normally
+overlooked in a typical fuzz campaign.
 
 EFuzz is also very general, and is designed to fuzz off-the-shelf user-mode
 Linux binaries with **zero configuration or set-up**.
@@ -66,10 +63,10 @@ How EFuzz Works?
 
 EFuzz is based on an underlying full environmental *Record and Replay* (rr)
 and fuzzing infrastructure (RR+Fuzzing=RRFuzz).
-The infrastructure is based on the insight that for typical user-mode
+The infrastructure is based on the insight that, for typical user-mode
 programs, all environmental interactions pass through the kernel-user mode
-boundary.
-Thus, by recording this boundary, we also implicitly record the program's
+interface.
+Thus, by recording this interface, we also implicitly record the program's
 interaction with the environment, which then can be subject to fuzzing.
 Basically, EFuzz works in two phases:
 
@@ -258,6 +255,12 @@ Programme (Fuzz Testing NRF-NCR25-Fuzz-0001).  Any opinions, findings and
 conclusions, or recommendations expressed in this material are those of the
 author(s) and do not reflect the views of National Research Foundation,
 Singapore, and Cyber Security Agency of Singapore.
+
+License
+-------
+
+This software has been released under the GNU Public License (GPL) Version 3.
+See the `LICENSE` file for more information.
 
 Preprint
 --------

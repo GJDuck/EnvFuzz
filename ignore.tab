@@ -1,0 +1,7 @@
+*/lib*.so*      # Old ld.so is too buggy
+/dev/zero       # Must always be zeroes
+/proc/*         # Structured input
+netlink://*     # Structured input
+pipe://*        # Self-pipe
+event://*       # Special fd
+epoll://*       # Special fd
