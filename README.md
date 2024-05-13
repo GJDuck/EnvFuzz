@@ -35,9 +35,8 @@ Unlike existing fuzzers, which only fuzz a specific input source (like AFL),
 EFuzz fuzzes the **entire interaction** between the subject and its
 environment (&#x3B5;)---including all files (configuration, cache, resource,
 fonts, etc.), sockets (session manager, accessibility service, name service,
-etc.), user interactions via the windowing system (mouse movements, button
-clicks, etc.), special files, devices, and standard streams, as illustrated
-below:
+etc.), user interactions via the windowing system, special files, devices, and
+standard streams, as illustrated below:
 
 <p align="center">
 <img src="img/calc-full.png"
@@ -47,9 +46,9 @@ below:
 
 In other words, EFuzz considers the entire environment (&#x3B5;) itself is
 the fuzz target---a.k.a.  *program environment fuzzing*.
-This even includes user interactions via the windowing system, which are
-treated as just another input source, no different than any other socket or
-file.
+This even includes user interactions via the windowing system (e.g., mouse
+movements, button clicks, etc.), which are treated as just another input
+source, no different than any other socket or file.
 This makes EFuzz a very comprehensive fuzzer, as it will automatically fuzz
 all inputs (and input combinations), even obscure inputs that are normally
 overlooked in a typical fuzz campaign.
@@ -138,11 +137,11 @@ Fuzz:
 
 Replay crash:
 
-        $ ./EFuzz replay out/crash/CRASH_SIGSEGV_1.patch
+        $ ./EFuzz replay out/crash/SIGSEGV_XXXX_mYYYYY.patch
 
 Debug crash:
 
-        $ ./EFuzz replay out/crash/CRASH_SIGSEGV_1.patch -d
+        $ ./EFuzz replay out/crash/SIGSEGV_XXXX_mYYYYY.patch -d
 
 EFuzz also supports (optional) AFL-style coverage instrumentation:
 
