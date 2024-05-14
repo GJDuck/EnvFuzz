@@ -66,7 +66,7 @@ fi
 echo -e "${GREEN}$0${OFF}: building hook ($HOOK)..."
 if [ "$LIBC" = "" ]
 then
-    LIBC=/lib/x86_64-linux-gnu/libc.so.6
+    LIBC="$(g++ --print-file-name=libc.so.6)"
 fi
 ./e9compile.sh rr_main.cpp -std=c++11 -O2 -I "$PWD" 
 g++ rr_main.o -o rr_main -pie -nostdlib -Wl,-z -Wl,max-page-size=4096 \
