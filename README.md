@@ -264,5 +264,12 @@ See the `LICENSE` file for more information.
 Preprint
 --------
 
-* Ruijie Meng, Gregory J. Duck, Abhik Roychoudhury, [*Program Environment Fuzzing*](https://arxiv.org/abs/2404.13951), 2024
-
+* Ruijie Meng, Gregory J. Duck, Abhik Roychoudhury, [*Program Environment Fuzzing*](https://arxiv.org/abs/2404.13951), 2024.
+  If you use this code in your scientific work, please cite the paper as follows:
+  ```
+  @article{efuzz,
+  title={Program Environment Fuzzing},
+  author={Meng, Ruijie and Duck, Gregory J. and Roychoudhury, Abhik},
+  journal={arXiv preprint arXiv:2404.13951},
+  year={2024}}
+  ```
