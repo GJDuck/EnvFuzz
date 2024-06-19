@@ -87,9 +87,9 @@ echo "./e9tool -M 'asm=\"syscall\"' -P 'replace entry(state)@rr_main' "$LIBC" -o
     -P 'replace abort_hook()@rr_main' \
     "$LIBC" -o "lib/libc.so.6" | tee "build.log"
 
-# STEP (4): compile EFuzz:
-echo -e "${GREEN}$0${OFF}: building EFuzz..."
-make EFuzz
+# STEP (4): compile env-fuzz:
+echo -e "${GREEN}$0${OFF}: building env-fuzz..."
+make env-fuzz
 
 # STEP (4): compile rrCovPlugin.so
 echo -e "${GREEN}$0${OFF}: building rrCovPlugin.so..."
@@ -107,6 +107,6 @@ echo -e " |_| \_\_| \_\_|   \__,_/___/___|${OFF}"
 echo
 echo "To use, run the following command:"
 echo
-echo "    EFuzz (record|replay|fuzz) [OPTION] -- PROGRAM [ARG ...]"
+echo "    env-fuzz (record|replay|fuzz) [OPTION] -- PROGRAM [ARG ...]"
 echo
 
