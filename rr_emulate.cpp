@@ -108,7 +108,7 @@ static int emulate_hook(STATE *state)
     const INFO *info = &TABLE[call->no];
     if (info->passthru)
     {
-        state->rax = syscall(call);
+        call->result = syscall(call);
         goto emulate_exit;
     }
 
