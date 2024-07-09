@@ -1,4 +1,7 @@
 Name            Value   Input?  Size
+PR_GET_DUMPABLE 3       -       0
+PR_SET_DUMPABLE 4       -       0
+PR_SET_KEEPCAPS 8       -       0
 PR_SET_NAME     15      out     16
 PR_GET_NAME     16      in      16
 PR_CAPBSET_READ 23      -       0
