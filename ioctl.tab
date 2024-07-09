@@ -38,8 +38,12 @@ VT_GETSTATE         0x5603          out         6
 SIOCGIFNAME         0x8910          in          16
 SIOCGIFCONF         0x8912          fail        0
 SIOCGIFFLAGS        0x8913          in          32
+SIOCGIFADDR         0x8915          fail        0
+SIOCGIFNETMASK      0x891b          fail        0
 SIOCGIFMTU          0x8921          in          32
+SIOCGIFHWADDR       0x8927          fail        0
 SIOCGIFINDEX        0x8933          in          40
+SIOCGIWNAME         0x8B01          fail        0
 TIOCSPTLCK          0x40045431      -           0
 TIOCGPTN            0x80045430      in          4
 DRM_IOCTL_VERSION   0xc0406400      fail        64
