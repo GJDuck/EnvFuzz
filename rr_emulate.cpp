@@ -95,6 +95,19 @@ static void emulate_set_time(time_t t)
     emulate_set_gettime(CLOCK_REALTIME, &ts);
 }
 
+static intptr_t emulate_kill(pid_t pid, int sig)
+{
+    if (pid != 0 && pid != -1 && pid != INFO_pid)
+        return -ENOSYS;
+    switch (sig)
+    {
+        case SIGSTOP:
+            return 0;   // Ignore
+        default:
+            return syscall(SYS_kill, INFO_pid, sig);
+    }
+}
+
 /*
  * Emulate a syscall as best as possible.
  */
@@ -120,8 +133,8 @@ static int emulate_hook(STATE *state)
         case SYS_sched_yield:
             call->result = 0;
             break;
-        case SYS_tgkill: case SYS_kill:
-            call->result = syscall(call);
+        case SYS_kill:
+            call->result = emulate_kill(call->arg0.pid, call->arg1.sig);
             break;
         case SYS_exit_group:
             print_hook(stderr, call);
