@@ -218,6 +218,9 @@ static int record_hook(STATE *state)
             break;
         case SYS_shmget: case SYS_shmctl: case SYS_shmat: case SYS_execve:
         case SYS_execveat: case SYS_arch_prctl: case SYS_get_thread_area:
+        case /*SYS_rseq=*/334:
+            call->result = 0;
+            break;
         case SYS_set_thread_area:
             call->result = -ENOSYS;
             break;
