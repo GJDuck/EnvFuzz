@@ -71,7 +71,6 @@ struct THREAD
 #define THREAD_TLS      0xb8    // Unused %fs offset
 #define MAX_CPU         4096    // (Assumed) max CPU number
 static int thread_id = 0;       // Next thread-ID
-static pid_t *thread_ctid = NULL;
 
 /*
  * Thread run lock.
@@ -122,15 +121,6 @@ static void thread_set_self(THREAD *self)
 static void THREAD_UNLOCK(void)
 {
     mutex_unlock(&thread_mutex);
-    if (thread_ctid != NULL)
-    {
-        // A thread has exitted; wait for the exit operation to complete:
-        pid_t pid = *thread_ctid;
-        if (pid > 0 &&
-                syscall(SYS_futex, thread_ctid, FUTEX_WAIT, pid, NULL) < 0)
-            error("failed to wait for thread exit: %s", strerror(errno));
-        thread_ctid = NULL;
-    }
 }
 
 /*
@@ -262,7 +252,7 @@ static NORETURN void thread_exit(STATE *state)
 {
     THREAD *self = thread_self();
     if (self->ctid != NULL)
-        thread_ctid = self->ctid;
+        *self->ctid = 0x0;
     mutex_unlock(&thread_mutex);
     xfree(self);
     syscall(SYS_exit, (int)state->rdi);

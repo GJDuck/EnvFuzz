@@ -293,7 +293,7 @@ static void fiber_exit(void)
     FIBER *self = fiber_self();
     (void)tdelete(self, &fibers, fiber_compare);
     if (self->ctid != NULL)
-        self->ctid[0] = 0x0;
+        *self->ctid = 0x0;
     xfree(self);
     self = NULL;
 }
