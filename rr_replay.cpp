@@ -462,7 +462,6 @@ static int replay_hook(STATE *state)
             switch (exp->no)
             {
                 case SYS_start:
-                    print_hook(stderr, exp);
                     continue;
                 case SYS_setpid:
                     replay_setpid(exp->arg0.pid);
@@ -474,6 +473,8 @@ static int replay_hook(STATE *state)
             }
             break;
         }
+        if (exp->no == SYS_start)
+            print_hook(stderr, exp);
         FIBER_SWITCH(exp->id);
     }
     if (fuzzer_emulate)
@@ -518,7 +519,7 @@ static int replay_hook(STATE *state)
     switch (call->no)
     {
         // Special cases:
-        case SYS_shmat: case SYS_execve: case SYS_execveat:
+        case SYS_execve: case SYS_execveat:
             error("%s() is not-yet-implemented", syscall_name(call->no));
         case SYS_fork: case SYS_vfork: 
             call->result = fiber_fork();
@@ -749,6 +750,8 @@ static int replay_hook(STATE *state)
     {
         switch (call->no)
         {
+            case SYS_start:
+                return REPLACE; // Already printed
             case SYS_exit_group:
                 print_hook(stderr, call);
                 syscall(SYS_exit_group, call->arg0.i32);
