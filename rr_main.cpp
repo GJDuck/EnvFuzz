@@ -314,6 +314,15 @@ static void patch_vdso(char **envp)
                 if ((aux->a_un.a_val & /*HWCAP2_FSGSBASE*/0x2) == 0)
                     option_fsgsbase = false;
                 break;
+            case AT_RANDOM:
+            {
+                // Note: we opportunisitcally overwrite this here, although it
+                //       has nothing to do with VDSO patching.
+                uint8_t *ptr = (uint8_t *)aux->a_un.a_val;
+                if (ptr != NULL)
+                    memset(ptr, 0xe9, 16);
+                break;
+            }
             default:
                 break;
         }

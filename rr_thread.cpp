@@ -147,6 +147,9 @@ extern "C"
         asm volatile ("vzeroall");
         uint32_t mxcsr = 0x1f80;
         asm volatile ("ldmxcsr %0" : : "m"(mxcsr));
+        if (syscall(SYS_arch_prctl, /*ARCH_SET_CPUID=*/0x1012, 0x0) < 0)
+            warning("failed to enable cpuid interception "
+                "(replay may diverge): %s", strerror(errno));
         record_start(self->id);
         jump(&self->state);
     }

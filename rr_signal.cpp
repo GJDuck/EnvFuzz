@@ -107,10 +107,10 @@ static void signal_segv_handler(int sig, siginfo_t *info, void *ctx_0)
         );
         if (syscall(SYS_arch_prctl, /*ARCH_SET_CPUID=*/0x1012, 0x0) < 0)
             error("failed to enable cpuid interception: %s", strerror(errno));
-        if (rax == 0x1 && rcx == 0x0)
-            ecx &= ~(1u << 30);     // Attempt to disable rdrand
+        if (rax == 0x1)
+            ecx &= ~(1u << 30);                 // Disable rdrand
         if (rax == 0x7 && rcx == 0x0)
-            ebx &= ~(1u << 18);     // Attempt to disable rdseed
+            ebx &= ~((1u << 18) | (1u << 11));  // Disable rdseed & rtm
         ctx[REG_RAX] = eax;
         ctx[REG_RBX] = ebx;
         ctx[REG_RCX] = ecx;
