@@ -24,8 +24,14 @@
 /*
  * Helpful emulation info.
  */
-static pid_t    INFO_pid = 0;
-static pid_t    INFO_tid = 0;
+static pid_t    INFO_pid  = 0;
+static pid_t    INFO_tid  = 0;
+static uid_t    INFO_uid  = 0;
+static uid_t    INFO_euid = 0;
+static uid_t    INFO_suid = 0;
+static gid_t    INFO_gid  = 0;
+static gid_t    INFO_egid = 0;
+static gid_t    INFO_sgid = 0;
 static uint64_t INFO_gettime[9] = {0};
 
 static void emulate_set_pid(pid_t pid)
@@ -45,7 +51,8 @@ static intptr_t emulate_gettime(int clk, struct timespec *ts)
         return -EINVAL;
     if (INFO_gettime[clk] == 0)
         return -ENOSYS;
-    INFO_gettime[clk] += 1000000;   // 1ms
+    for (size_t i = 0; i < sizeof(INFO_gettime) / sizeof(INFO_gettime[0]); i++)
+        INFO_gettime[i] += 1000000;   // 1ms
     ts->tv_sec  = INFO_gettime[clk] / 1000000000;
     ts->tv_nsec = INFO_gettime[clk] % 1000000000;
     return 0;
@@ -72,6 +79,21 @@ static intptr_t emulate_time(time_t *tp)
     if (tp != NULL)
         *tp = (time_t)r;
     return r;
+}
+static int emulate_nanosleep(const struct timespec *ts, struct timespec *rem)
+{
+    if (rem != NULL)
+    {
+        rem->tv_sec = 0;
+        rem->tv_nsec = 0;
+    }
+    uint64_t t = ts->tv_sec * 1000000000 + ts->tv_nsec;
+    if (t == 0)
+        return 0;
+    for (size_t i = 0; i < sizeof(INFO_gettime) / sizeof(INFO_gettime[0]); i++)
+        INFO_gettime[i] += t;
+    FIBER_NEXT();
+    return 0;
 }
 
 static void emulate_set_gettime(int clk, const struct timespec *ts)
@@ -106,6 +128,31 @@ static intptr_t emulate_kill(pid_t pid, int sig)
         default:
             return syscall(SYS_kill, INFO_pid, sig);
     }
+}
+
+static uid_t emulate_getuid(void)
+{
+    return (INFO_uid == 0? 1000: INFO_uid);
+}
+static uid_t emulate_geteuid(void)
+{
+    return (INFO_euid == 0? emulate_getuid(): INFO_euid);
+}
+static uid_t emulate_getsuid(void)
+{
+    return (INFO_suid == 0? emulate_getuid(): INFO_suid);
+}
+static gid_t emulate_getgid(void)
+{
+    return (INFO_gid == 0? 1000: INFO_gid);
+}
+static gid_t emulate_getegid(void)
+{
+    return (INFO_egid == 0? emulate_getgid(): INFO_egid);
+}
+static gid_t emulate_getsgid(void)
+{
+    return (INFO_sgid == 0? emulate_getgid(): INFO_sgid);
 }
 
 /*
@@ -153,6 +200,30 @@ static int emulate_hook(STATE *state)
         case SYS_getpid:
             call->result = INFO_pid;
             break;
+        case SYS_getuid:
+            call->result = emulate_getuid();
+            break;
+        case SYS_geteuid:
+            call->result = emulate_geteuid();
+            break;
+        case SYS_getgid:
+            call->result = emulate_getgid();
+            break;
+        case SYS_getegid:
+            call->result = emulate_getegid();
+            break;
+        case SYS_getresuid:
+            *call->arg0.ip = emulate_getuid();
+            *call->arg1.ip = emulate_geteuid();
+            *call->arg2.ip = emulate_getsuid();
+            call->result = 0;
+            break;
+        case SYS_getresgid:
+            *call->arg0.ip = emulate_getgid();
+            *call->arg1.ip = emulate_getegid();
+            *call->arg2.ip = emulate_getsgid();
+            call->result = 0;
+            break;
         case SYS_clock_gettime:
             call->result = emulate_gettime(call->arg0.i32, call->arg1.ts);
             break;
@@ -161,6 +232,9 @@ static int emulate_hook(STATE *state)
             break;
         case SYS_time:
             call->result = emulate_time((time_t *)call->arg0.ptr);
+            break;
+        case SYS_nanosleep:
+            call->result = emulate_nanosleep(call->arg0.ts, call->arg1.ts);
             break;
         case SYS_mmap:
         {
@@ -198,6 +272,10 @@ static int emulate_hook(STATE *state)
                 timeout);
             break;
         }
+        case SYS_rt_sigaction:
+            call->result = signal_action(call->arg0.sig, call->arg1.action,
+                call->arg2.action);
+            break;
         case SYS_futex:
         {
             int *addr = (int *)call->arg0.ptr;

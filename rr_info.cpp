@@ -39,6 +39,7 @@ union ARG                       // Syscall arg
     int *fds;                   // Cast to int[2]
     uint8_t *buf;               // Cast to buffer
     void *ptr;                  // Cast to (void *)
+    int *ip;                    // Cast to (int *)
     size_t size;                // Cast to size
     off_t offset;               // Cast to offset
     const char *path;           // Cast to pathname

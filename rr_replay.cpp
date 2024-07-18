@@ -774,6 +774,28 @@ static int replay_hook(STATE *state)
             case SYS_time:
                 emulate_set_time(call->result);
                 break;
+            case SYS_getuid:
+                INFO_uid = call->result;
+                break;
+            case SYS_geteuid:
+                INFO_euid = call->result;
+                break;
+            case SYS_getgid:
+                INFO_gid = call->result;
+                break;
+            case SYS_getegid:
+                INFO_egid = call->result;
+                break;
+            case SYS_getresuid:
+                INFO_uid  = *call->args[0].ip;
+                INFO_euid = *call->args[1].ip;
+                INFO_suid = *call->args[2].ip;
+                break;
+            case SYS_getresgid:
+                INFO_gid  = *call->args[0].ip;
+                INFO_egid = *call->args[1].ip;
+                INFO_sgid = *call->args[2].ip;
+                break;
             default:
                 break;
         }
