@@ -24,6 +24,13 @@
 #define SCHED_FD            9999
 #define SCHED_PORT          9999
 
+struct EPOLL
+{                           // epoll() info
+    struct epoll_event event;   // Event
+    int fd;                 // File descriptor
+    EPOLL *next;            // Next info
+};
+
 struct ENTRY
 {
     int fd;                 // File descriptor
@@ -35,6 +42,7 @@ struct ENTRY
     int port;               // Port #
     uint32_t seq;           // Seq #
     uint32_t ack;           // Ack #
+    EPOLL *epoll;           // epoll() info
     const char *name;       // Name
 };
 
@@ -299,5 +307,44 @@ static int fd_port(int fd)
     if (E == NULL)
         return -1;
     return E->port;
+}
+
+static void fd_epoll_ctl(int efd, int op, int fd,
+    struct epoll_event *event)
+{
+    ENTRY *E = fd_entry(efd);
+    if (E == NULL)
+        return;
+    EPOLL *info = nullptr, *prev = nullptr;
+    switch (op)
+    {
+        case EPOLL_CTL_ADD:
+            info = (EPOLL *)xmalloc(sizeof(EPOLL));
+            memcpy(&info->event, event, sizeof(info->event));
+            info->fd   = fd;
+            info->next = E->epoll;
+            E->epoll   = info;
+            return;
+        case EPOLL_CTL_MOD: case EPOLL_CTL_DEL:
+            for (info = E->epoll; info != NULL && info->fd != fd;
+                    info = info->next)
+                prev = info;
+            break;
+        default:
+            return;
+    }
+    switch (op)
+    {
+        case EPOLL_CTL_MOD:
+            memcpy(&info->event, event, sizeof(info->event));
+            break;
+        case EPOLL_CTL_DEL:
+            if (prev == NULL)
+                E->epoll = info->next;
+            else
+                prev->next = info->next;
+            xfree((void *)info);
+            break;
+    }
 }
 

@@ -787,14 +787,18 @@ static int replay_hook(STATE *state)
                 INFO_egid = call->result;
                 break;
             case SYS_getresuid:
-                INFO_uid  = *call->args[0].ip;
-                INFO_euid = *call->args[1].ip;
-                INFO_suid = *call->args[2].ip;
+                INFO_uid  = *call->arg0.ip;
+                INFO_euid = *call->arg1.ip;
+                INFO_suid = *call->arg2.ip;
                 break;
             case SYS_getresgid:
-                INFO_gid  = *call->args[0].ip;
-                INFO_egid = *call->args[1].ip;
-                INFO_sgid = *call->args[2].ip;
+                INFO_gid  = *call->arg0.ip;
+                INFO_egid = *call->arg1.ip;
+                INFO_sgid = *call->arg2.ip;
+                break;
+            case SYS_epoll_ctl:
+                fd_epoll_ctl(call->arg0.fd, call->arg1.i32, call->arg2.fd,
+                    call->arg3.event);
                 break;
             default:
                 break;

@@ -23,6 +23,7 @@
 
 struct mmsghdr;
 typedef struct sigaltstack stack_t;
+struct epoll_event;
 
 union ARG                       // Syscall arg
 {
@@ -54,6 +55,7 @@ union ARG                       // Syscall arg
     unsigned long *cpuset;      // Cast to CPU set
     stack_t *stack;             // Cast to stack_t
     struct pollfd *pfds;        // Cast to pollfd
+    struct epoll_event *event;  // Cast to struct epoll_event
     fd_set *fdset;              // Cast to fd_set
     struct timeval *tv;         // Cast to timeval
     struct timespec *ts;        // Cast to timespec

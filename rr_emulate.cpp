@@ -272,6 +272,16 @@ static int emulate_hook(STATE *state)
                 timeout);
             break;
         }
+        case SYS_epoll_wait:
+        {
+            int efd = call->arg0.fd;
+            struct epoll_event *events = call->arg1.event;
+            int maxevents = call->arg2.i32;
+            int timeout = call->arg2.i32;
+            call->result = queue_emulate_epoll_wait(efd, events, maxevents,
+                timeout);
+            break;
+        }
         case SYS_rt_sigaction:
             call->result = signal_action(call->arg0.sig, call->arg1.action,
                 call->arg2.action);

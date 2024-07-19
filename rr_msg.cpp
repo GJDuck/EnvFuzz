@@ -202,7 +202,7 @@ static ssize_t queue_emulate_read(iovec *iov, size_t iovcnt, int fd)
         switch (E->eof++)
         {
             case 0:
-                return (E->filetype == S_IFSOCK? -ENOTCONN: 0);
+                return (E->filetype == S_IFSOCK? -ECONNRESET: 0);
             case 1: 
                 if (E->filetype != S_IFSOCK)
                     return -EIO;
@@ -232,6 +232,8 @@ static ssize_t queue_emulate_read(iovec *iov, size_t iovcnt, int fd)
 static ssize_t queue_emulate_write(iovec *iov, size_t iovcnt, int fd)
 {
     ENTRY *E = fd_get(fd);
+    if (E->eof > 0)
+        return (E->filetype != S_IFSOCK? -EIO: -ECONNRESET);
     QUEUE *Q = option_Q;
     MSG *M   = queue_peek(Q, E->port);
     if (M != NULL && M->outbound)
@@ -279,8 +281,10 @@ static int queue_emulate_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 {
     if (nfds < 0) return -EINVAL;
     if (nfds == 0) return 0;
+    bool retry = false;
 
     // Step (1): Satisfy the request "normally":
+retry: {}
     QUEUE *Q = option_Q;
     int seen = 0, hup = 0, count = 0;
     for (nfds_t i = 0; i < nfds; i++)
@@ -299,7 +303,8 @@ static int queue_emulate_poll(struct pollfd *fds, nfds_t nfds, int timeout)
         if (M == NULL)
         {
             hup++;
-            fds[i].revents = POLLHUP;
+            fds[i].revents =
+                (E->eof > 0 && E->filetype == S_IFSOCK? POLLERR: POLLHUP);
             continue;
         }
         if ((fds[i].events & (POLLIN | POLLOUT)) == 0x0)
@@ -312,10 +317,20 @@ static int queue_emulate_poll(struct pollfd *fds, nfds_t nfds, int timeout)
             count++;
         }
     }
-    if (count > 0 || seen == 0 || hup > 0 || timeout == 0)
+    if (count > 0 || timeout == 0)
         return count;
 
-    // Step (2): Allow POLLOUT (if any):
+    // Step (2): Try switching threads:
+    if (retry)
+    {
+        retry = false;
+        FIBER_NEXT();
+        goto retry;
+    }
+    if (seen == 0 || hup > 0)
+        return count;
+
+    // Step (3): Allow POLLOUT (if any):
     for (nfds_t i = 0; i < nfds; i++)
     {
         if (fds[i].fd < 0)
@@ -327,8 +342,8 @@ static int queue_emulate_poll(struct pollfd *fds, nfds_t nfds, int timeout)
     }
     if (count > 0)
         return count;
- 
-    // Step (2): Allow POLLIN by reordering (if any):
+
+    // Step (4): Allow POLLIN by reordering (if any):
     ssize_t min_i = -1, min_d = /*MAX=*/16;
     for (nfds_t i = 0; i < nfds; i++)
     {
@@ -357,7 +372,7 @@ static int queue_emulate_poll(struct pollfd *fds, nfds_t nfds, int timeout)
         return 1;
     }
 
-    // Step (3): Fail the operation
+    // Step (5): Fail the operation
     for (nfds_t i = 0; i < nfds; i++)
     {
         if (fds[i].fd < 0)
@@ -375,7 +390,7 @@ static int queue_emulate_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 static int queue_emulate_select(int nfds, fd_set *rfds, fd_set *wfds,
     fd_set *efds, int timeout)
 {
-    // We just translate this into a poll() syscall:
+    // We translate this into a poll() syscall:
     struct pollfd fds[nfds];
     int j = 0;
     for (int i = 0; i < nfds; i++)
@@ -408,14 +423,64 @@ static int queue_emulate_select(int nfds, fd_set *rfds, fd_set *wfds,
         }
         short poll_read  = (POLLIN  | POLLHUP);
         short poll_write = (POLLOUT | POLLHUP);
+        short poll_err   = POLLERR;
         short events     = fds[k].events;
         r += (rfds != NULL && (events & poll_read)?  1: 0);
         r += (wfds != NULL && (events & poll_write)? 1: 0);
+        r += (efds != NULL && (events & poll_err)?   1: 0);
         if (rfds != NULL && (events & poll_read)  == 0) FD_CLR(i, rfds);
         if (wfds != NULL && (events & poll_write) == 0) FD_CLR(i, wfds);
-        if (efds != NULL) FD_CLR(i, efds);
+        if (efds != NULL && (events & poll_err)   == 0) FD_CLR(i, efds);
         k++;
     }
     return r;
+}
+
+/*
+ * Emulated epoll_wait() syscall.
+ */
+static int queue_emulate_epoll_wait(int efd, struct epoll_event *events,
+    int maxevents, int timeout)
+{
+    // We translate this into a poll() syscall:
+    const ENTRY *E = fd_entry(efd);
+    if (E == nullptr || events == NULL || maxevents <= 0)
+        return -EINVAL;
+    int nfds = 0, i = 0, j = 0;
+    for (const EPOLL *info = E->epoll; info != NULL; info = info->next)
+        nfds++;
+    if (nfds == 0)
+        return 0;
+    struct pollfd fds[nfds];
+    for (const EPOLL *info = E->epoll; info != NULL; info = info->next)
+    {
+        fds[i].fd     = info->fd;
+        fds[i].events =
+            (info->event.events & EPOLLIN?  POLLIN:  0x0) |
+            (info->event.events & EPOLLOUT? POLLOUT: 0x0);
+        fds[i].revents = 0x0;
+        i++;
+    }
+    int r = queue_emulate_poll(fds, nfds, timeout);
+    if (r < 0)
+        return r;
+    i = 0;
+    for (const EPOLL *info = E->epoll; info != NULL; info = info->next)
+    {
+        if (fds[i].revents != 0x0)
+        {
+            events[j].events = 
+                (fds[i].revents & POLLIN?  EPOLLIN:  0x0) |
+                (fds[i].revents & POLLOUT? EPOLLOUT: 0x0) |
+                (fds[i].revents & POLLHUP? EPOLLHUP: 0x0) |
+                (fds[i].revents & POLLERR? EPOLLERR: 0x0);
+            memcpy(&events[j].data, &info->event.data, sizeof(events[j].data));
+            j++;
+            if (j >= maxevents)
+                break;
+        }
+        i++;
+    }
+    return j;
 }
 
