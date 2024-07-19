@@ -261,17 +261,19 @@ License
 This software has been released under the GNU Public License (GPL) Version 3.
 See the `LICENSE` file for more information.
 
-Preprint
+Citing EnvFuzz
 --------
 
-* Ruijie Meng, Gregory J. Duck, Abhik Roychoudhury, [*Program Environment Fuzzing*](https://arxiv.org/abs/2404.13951), 2024.
+For more information, please see our research paper:
+
+* Ruijie Meng, Gregory J. Duck, Abhik Roychoudhury, [*Program Environment Fuzzing*](https://arxiv.org/abs/2404.13951), ACM SIGSAC Conference on Computer and Communications Security (CCS), 2024.
 
 If you use this code in your scientific work, please cite the paper as follows:
 
-        @article{envfuzz,
-            title={Program Environment Fuzzing},
-            author={Meng, Ruijie and Duck, Gregory J. and Roychoudhury, Abhik},
-            journal={arXiv preprint arXiv:2404.13951},
-            year={2024}
-        }
+    @inproceedings{envfuzz,
+        title={Program Environment Fuzzing},
+        author={Meng, Ruijie and Duck, Gregory J. and Roychoudhury, Abhik},
+        booktitle={Proceedings of the 31st ACM SIGSAC Conference on Computer and Communications Security (CCS)},
+        year={2024}
+    }
 
