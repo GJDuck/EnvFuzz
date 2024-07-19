@@ -261,7 +261,7 @@ License
 This software has been released under the GNU Public License (GPL) Version 3.
 See the `LICENSE` file for more information.
 
-Preprint
+Citing EnvFuzz
 --------
 
 For more information, please see our research paper:
