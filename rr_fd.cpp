@@ -309,12 +309,12 @@ static int fd_port(int fd)
     return E->port;
 }
 
-static void fd_epoll_ctl(int efd, int op, int fd,
+static int fd_epoll_ctl(int efd, int op, int fd,
     struct epoll_event *event)
 {
     ENTRY *E = fd_entry(efd);
     if (E == NULL)
-        return;
+        return -EBADF;
     EPOLL *info = nullptr, *prev = nullptr;
     switch (op)
     {
@@ -324,14 +324,14 @@ static void fd_epoll_ctl(int efd, int op, int fd,
             info->fd   = fd;
             info->next = E->epoll;
             E->epoll   = info;
-            return;
+            return 0;
         case EPOLL_CTL_MOD: case EPOLL_CTL_DEL:
             for (info = E->epoll; info != NULL && info->fd != fd;
                     info = info->next)
                 prev = info;
             break;
         default:
-            return;
+            return -EINVAL;
     }
     switch (op)
     {
@@ -346,5 +346,6 @@ static void fd_epoll_ctl(int efd, int op, int fd,
             xfree((void *)info);
             break;
     }
+    return 0;
 }
 

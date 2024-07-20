@@ -177,7 +177,7 @@ static int record_hook(STATE *state)
     SYSCALL call_0 = {0};
     SYSCALL *call = &call_0;
 
-    syscall_init(call, state);
+    syscall_init(call, state, /*replay=*/false);
     call->id = thread_self()->id;
     call->no = (int)state->rax;
     AUXVEC auxv(call);

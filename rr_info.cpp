@@ -74,7 +74,8 @@ struct AUX                      // Syscall auxiliary data
 struct SYSCALL                  // Syscall instance
 {
     int no;                     // Syscall number
-    int id;                     // Thread ID
+    int id:31;                  // Thread ID
+    int replay:1;               // Replay?
     union
     {
         struct
@@ -924,7 +925,7 @@ static bool arg_is_pointer(uint8_t arg)
 /*
  * Init a syscall from a state.
  */
-static void syscall_init(SYSCALL *call, const STATE *state)
+static void syscall_init(SYSCALL *call, const STATE *state, bool replay)
 {
     call->no       = state->rax;
     call->arg0.val = state->rdi;
@@ -933,6 +934,7 @@ static void syscall_init(SYSCALL *call, const STATE *state)
     call->arg3.val = state->r10;
     call->arg4.val = state->r8;
     call->arg5.val = state->r9;
+    call->replay   = replay;
 }
 
 /*
@@ -1328,6 +1330,12 @@ static bool aux_get(const AUX *aux, struct msghdr *msg, uint8_t mask,
     aux = aux_find(aux, SIZE_MAX, mask, kind);
     if (aux == NULL) return false;
     return (aux_deserialize(aux->data, aux->data + aux->size, msg) != NULL);
+}
+static const uint8_t *aux_data(const AUX *aux, uint8_t mask, unsigned kind)
+{
+    aux = aux_find(aux, SIZE_MAX, mask, kind);
+    if (aux == NULL) return NULL;
+    return aux->data;
 }
 
 static bool aux_check(const AUX *aux, const uint8_t *buf, size_t size,

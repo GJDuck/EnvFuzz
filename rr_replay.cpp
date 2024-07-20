@@ -52,7 +52,10 @@ static void print_aux(PRINTER &P, const INFO *info, const SYSCALL *call, int i)
     aux = aux_find(aux, SIZE_MAX, mask, kind);
     if (aux == NULL)
     {
-        print_arg(P, info, call, i);
+        if (!arg_is_pointer(kind))
+            print_arg(P, info, call, i);
+        else
+            P.format("%p", call->args[i].ptr);
         return;
     }
     switch (kind)
@@ -65,14 +68,33 @@ static void print_aux(PRINTER &P, const INFO *info, const SYSCALL *call, int i)
             print_msghdr_struct(P, (struct msghdr *)aux->data);
             break;
         default:
-            print_arg(P, info, kind, (intptr_t)aux->data, 0, aux->size,
+        {
+            size_t next = (i == 5? 0: call->args[i+1].size);
+            size_t prev = (i == 0? 0: call->args[i-1].size);
+            print_arg(P, info, kind, (intptr_t)aux->data, prev, next,
                 aux->size);
             break;
+        }
     }
 }
 
 static void print_aux_syscall(PRINTER &P, const SYSCALL *call)
 {
+#if 0
+    const AUX *aux = call->aux;
+    while (aux->kind != AEND)
+    {
+        fprintf(stderr, "[%s,#%d]",
+            arg_name(aux->kind),
+            (aux->mask == 0x1? 1:
+             aux->mask == 0x2? 2:
+             aux->mask == 0x4? 3:
+             aux->mask == 0x8? 4:
+             aux->mask == 0x10? 5: 6));
+        aux = (const AUX *)((uint8_t *)aux + aux->size + sizeof(AUX));
+    }
+#endif
+
     P.format("%s(", syscall_name(call->no));
     int n = syscall_arity(call);
     const INFO *info = syscall_info(call->no);
@@ -482,7 +504,7 @@ static int replay_hook(STATE *state)
 
     SYSCALL call_0 = {0};
     SYSCALL *call = &call_0;
-    syscall_init(call, state);
+    syscall_init(call, state, /*relay=*/true);
     call->id = fiber_self()->id;
 
     const AUX *aux = exp->aux;
@@ -774,28 +796,6 @@ static int replay_hook(STATE *state)
             case SYS_time:
                 emulate_set_time(call->result);
                 break;
-            case SYS_getuid:
-                INFO_uid = call->result;
-                break;
-            case SYS_geteuid:
-                INFO_euid = call->result;
-                break;
-            case SYS_getgid:
-                INFO_gid = call->result;
-                break;
-            case SYS_getegid:
-                INFO_egid = call->result;
-                break;
-            case SYS_getresuid:
-                INFO_uid  = *call->arg0.ip;
-                INFO_euid = *call->arg1.ip;
-                INFO_suid = *call->arg2.ip;
-                break;
-            case SYS_getresgid:
-                INFO_gid  = *call->arg0.ip;
-                INFO_egid = *call->arg1.ip;
-                INFO_sgid = *call->arg2.ip;
-                break;
             case SYS_epoll_ctl:
                 fd_epoll_ctl(call->arg0.fd, call->arg1.i32, call->arg2.fd,
                     call->arg3.event);
@@ -832,6 +832,10 @@ static void replay_init(void)
         if (aux_get(aux, (uint8_t *)&port, sizeof(port), M_R, APRT) &&
                 aux_get(aux, (uint8_t *)buf, sizeof(buf)-1, M_R, ANAM))
             name_set(port, buf, /*replace=*/true);
+        // PRINTER P;
+        // print_aux_syscall(P, call);
+        // fprintf(stderr, "%s\n", P.str());
+        emulate_set_syscall(call);
         if (M->next == H)
             break;
     }
