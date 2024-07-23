@@ -126,11 +126,6 @@ static void queue_validate(const SYSCALL *exp, int i, uint8_t arg, int fd,
             fd, syscall_name(exp->no), i);
         return;
     }
-    if (E->event.enabled)
-    {
-        (void)eventfd_emulate_write(E, iov, iovcnt);
-        return;
-    }
 
     PRINTER P;
     if (option_log >= 1 && option_log <= 2 &&
@@ -158,8 +153,9 @@ static void queue_validate(const SYSCALL *exp, int i, uint8_t arg, int fd,
         print_diff(P, iov, iovcnt, &iov2, 1);
         mismatch("mismatching output for %s() arg #%d\n%s",
              syscall_name(exp->no), i+1, P.str());
-        return;
     }
+    if (E->event.enabled)
+        (void)eventfd_emulate_write(E, iov, iovcnt);
 }
 static void queue_validate(const SYSCALL *exp, int i, uint8_t arg, int fd,
     const uint8_t *buf, size_t size)

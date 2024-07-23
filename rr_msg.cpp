@@ -145,8 +145,6 @@ static void queue_purge(QUEUE *Q, int port)
 static ssize_t queue_get(iovec *iov, size_t iovcnt, int fd)
 {
     ENTRY *E = fd_get(fd);
-    if (E->event.enabled)
-        return eventfd_emulate_read(E, iov, iovcnt);
     QUEUE *Q = option_Q;
     MSG *M = queue_pop(Q, E->port);
     if (M == NULL)
@@ -181,6 +179,8 @@ static ssize_t queue_get(iovec *iov, size_t iovcnt, int fd)
 
     struct iovec iov2 = {M->payload, M->len};
     ssize_t r = (ssize_t)iov_copy(iov, iovcnt, &iov2, 1, SIZE_MAX);
+    if (E->event.enabled)
+        eventfd_check_read(E, iov, iovcnt);
     return r;
 }
 static ssize_t queue_get(uint8_t *buf, size_t size, int fd)

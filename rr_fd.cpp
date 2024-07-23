@@ -383,13 +383,35 @@ static ssize_t eventfd_emulate_read(ENTRY *E, iovec *iov, size_t iovcnt)
     if (E->event.val == 0)
         return -EAGAIN;
     uint64_t val = (E->event.semaphore? 1: E->event.val);
-    fprintf(stderr, "%sEMULATE%s read(%d) = %llu\n", BLUE, OFF, E->fd, val);
     E->event.val -= val;
     struct iovec iov2;
     iov2.iov_base = (void *)&val;
     iov2.iov_len  = sizeof(val);
     iov_copy(iov, iovcnt, &iov2, 1, sizeof(val));
     return sizeof(uint64_t);
+}
+static void eventfd_check_read(ENTRY *E, iovec *iov, size_t iovcnt)
+{
+    uint64_t val = 0;
+    struct iovec iov2;
+    iov2.iov_base = (void *)&val;
+    iov2.iov_len  = sizeof(val);
+    ssize_t r = eventfd_emulate_read(E, &iov2, 1);
+    if (r != sizeof(uint64_t))
+    {
+        PRINTER P;
+        print_result(P, RSIZ, r);
+        error("mismatching emulation result for eventfd read; "
+            "expected=%zu, got=%s", sizeof(uint64_t), P.str());
+    }
+    if (!iov_equal(iov, iovcnt, &iov2, 1, sizeof(uint64_t)))
+    {
+        uint64_t val2 = 0;
+        iov_copy((uint8_t *)&val2, sizeof(val2), iov, iovcnt,
+            sizeof(uint64_t));
+        error("mismatching emulation value for eventfd read; "
+            "expected=%zu, got=%zu", val2, val);
+    }
 }
 static ssize_t eventfd_emulate_write(ENTRY *E, const iovec *iov, size_t iovcnt)
 {
@@ -401,7 +423,6 @@ static ssize_t eventfd_emulate_write(ENTRY *E, const iovec *iov, size_t iovcnt)
     uint64_t max = UINT64_MAX-1;
     if (max - E->event.val < val)
         return -EAGAIN;
-    fprintf(stderr, "%sEMULATE%s write(%d) = %llu\n", BLUE, OFF, E->fd, val);
     E->event.val += val;
     return sizeof(uint64_t);
 }
