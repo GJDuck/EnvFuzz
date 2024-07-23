@@ -403,7 +403,7 @@ static int record_hook(STATE *state)
                     break;
                 fd = (arg == A_FD? call->args[i].fd: fd);
                 uint8_t mask = (MI_____ << i);
-                bool outbound = syscall_output(call, i);
+                bool outbound = syscall_is_output(call, i);
                 if (!success)
                     continue;   // Nothing to record
                 if (!syscall_used(call, i))

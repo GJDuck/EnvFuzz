@@ -126,6 +126,11 @@ static void queue_validate(const SYSCALL *exp, int i, uint8_t arg, int fd,
             fd, syscall_name(exp->no), i);
         return;
     }
+    if (E->event.enabled)
+    {
+        (void)eventfd_emulate_write(E, iov, iovcnt);
+        return;
+    }
 
     PRINTER P;
     if (option_log >= 1 && option_log <= 2 &&
@@ -580,7 +585,8 @@ static int replay_hook(STATE *state)
                 socket_name((int)call->result, name, sizeof(name)));
             goto handler;
         case SYS_eventfd: case SYS_eventfd2:
-            fd_open((int)call->result, S_IFSOCK, SOCK_DGRAM, 0x0,
+            fd_eventfd((int)call->result, call->arg0.u32,
+                (call->no == SYS_eventfd2? call->arg1.flags: 0x0),
                 event_name((int)call->result, name, sizeof(name)));
             goto handler;
         case SYS_epoll_create: case SYS_epoll_create1:
@@ -641,7 +647,7 @@ static int replay_hook(STATE *state)
                     break;
                 fd = (arg == A_FD? call->args[i].fd: fd);
                 uint8_t mask = (MI_____ << i);
-                bool output = syscall_output(call, i);
+                bool output = syscall_is_output(call, i);
                 if (!syscall_used(call, i))
                     continue;
                 size_t size = 0;

@@ -31,6 +31,13 @@ struct EPOLL
     EPOLL *next;            // Next info
 };
 
+struct EVENT
+{                           // Eventfd info
+    bool enabled;           // Is an eventfd object?
+    bool semaphore;         // Is a semaphore?
+    uint64_t val;           // Event fd value
+};
+
 struct ENTRY
 {
     int fd;                 // File descriptor
@@ -43,6 +50,7 @@ struct ENTRY
     uint32_t seq;           // Seq #
     uint32_t ack;           // Ack #
     EPOLL *epoll;           // epoll() info
+    EVENT event;            // eventfd() info
     const char *name;       // Name
 };
 
@@ -250,6 +258,18 @@ static ENTRY *fd_open(int fd, int filetype, int socktype, int flags,
     return E;
 }
 
+static ENTRY *fd_eventfd(int fd, unsigned val, int flags, const char *name)
+{
+    ENTRY *E = fd_open(fd, S_IFSOCK, SOCK_DGRAM,
+        flags & (O_CLOEXEC | O_NONBLOCK), name);
+    if (E == NULL)
+        return NULL;
+    E->event.enabled   = true;
+    E->event.semaphore = ((flags & /*EFD_SEMAPHORE=*/00000001) != 0);
+    E->event.val       = val;
+    return E;
+}
+
 static ENTRY *fd_bind(int fd, const sockaddr *addr, socklen_t addrlen)
 {
     if (fd < 0)
@@ -347,5 +367,42 @@ static int fd_epoll_ctl(int efd, int op, int fd,
             break;
     }
     return 0;
+}
+
+static short eventfd_emulate_poll(ENTRY *E)
+{
+    uint64_t max = UINT64_MAX-1;
+    return (E->event.val > 0?    POLLIN:  0x0) |
+           (E->event.val != max? POLLOUT: 0x0);
+}
+static ssize_t eventfd_emulate_read(ENTRY *E, iovec *iov, size_t iovcnt)
+{
+    size_t size = iov_len(iov, iovcnt);
+    if (size < sizeof(uint64_t))
+        return -EINVAL;
+    if (E->event.val == 0)
+        return -EAGAIN;
+    uint64_t val = (E->event.semaphore? 1: E->event.val);
+    fprintf(stderr, "%sEMULATE%s read(%d) = %llu\n", BLUE, OFF, E->fd, val);
+    E->event.val -= val;
+    struct iovec iov2;
+    iov2.iov_base = (void *)&val;
+    iov2.iov_len  = sizeof(val);
+    iov_copy(iov, iovcnt, &iov2, 1, sizeof(val));
+    return sizeof(uint64_t);
+}
+static ssize_t eventfd_emulate_write(ENTRY *E, const iovec *iov, size_t iovcnt)
+{
+    size_t size = iov_len(iov, iovcnt);
+    if (size < sizeof(uint64_t))
+        return -EINVAL;
+    uint64_t val = 0;
+    iov_copy((uint8_t *)&val, sizeof(val), iov, iovcnt, sizeof(val));
+    uint64_t max = UINT64_MAX-1;
+    if (max - E->event.val < val)
+        return -EAGAIN;
+    fprintf(stderr, "%sEMULATE%s write(%d) = %llu\n", BLUE, OFF, E->fd, val);
+    E->event.val += val;
+    return sizeof(uint64_t);
 }
 
