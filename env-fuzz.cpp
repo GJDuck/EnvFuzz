@@ -937,8 +937,8 @@ int main(int argc, char **argv, char **envp)
                         // Child is ready; start GDB:
                         execlp("sudo", "sudo",
                             "gdb",
-                            "-ex",
-                            "handle SIGSYS nostop noprint",
+                            "-x",
+                            "env-fuzz.gdb",
                             progname.c_str(),
                             std::to_string(child).c_str(),
                             nullptr);
