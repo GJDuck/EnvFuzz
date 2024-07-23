@@ -179,6 +179,8 @@ static ssize_t queue_get(iovec *iov, size_t iovcnt, int fd)
 
     struct iovec iov2 = {M->payload, M->len};
     ssize_t r = (ssize_t)iov_copy(iov, iovcnt, &iov2, 1, SIZE_MAX);
+    if (E->event.enabled)
+        eventfd_check_read(E, iov, iovcnt);
     return r;
 }
 static ssize_t queue_get(uint8_t *buf, size_t size, int fd)
@@ -195,6 +197,9 @@ static ssize_t queue_get(uint8_t *buf, size_t size, int fd)
 static ssize_t queue_emulate_read(iovec *iov, size_t iovcnt, int fd)
 {
     ENTRY *E = fd_get(fd);
+    if (E->event.enabled)
+        return eventfd_emulate_read(E, iov, iovcnt);
+
     QUEUE *Q = option_Q;
     MSG *M   = queue_peek(Q, E->port);
     if (M == NULL)
@@ -232,6 +237,9 @@ static ssize_t queue_emulate_read(iovec *iov, size_t iovcnt, int fd)
 static ssize_t queue_emulate_write(iovec *iov, size_t iovcnt, int fd)
 {
     ENTRY *E = fd_get(fd);
+    if (E->event.enabled)
+        return eventfd_emulate_write(E, iov, iovcnt);
+
     if (E->eof > 0)
         return (E->filetype != S_IFSOCK? -EIO: -ECONNRESET);
     QUEUE *Q = option_Q;
@@ -297,6 +305,16 @@ retry: {}
         {
             count++;
             fds[i].revents = POLLNVAL;
+            continue;
+        }
+        if (E->event.enabled)
+        {
+            short revents = (fds[i].events & eventfd_emulate_poll(E));
+            if (revents != 0)
+            {
+                fds[i].revents = revents;
+                count++;
+            }
             continue;
         }
         MSG *M = queue_peek(Q, E->port);

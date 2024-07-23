@@ -1143,7 +1143,7 @@ static uint8_t *syscall_buf(const SYSCALL *call, int i, size_t *size_ptr)
 /*
  * Determine if a syscall arg is an input or output.
  */
-static bool syscall_output(const SYSCALL *call, int i)
+static bool syscall_is_output(const SYSCALL *call, int i)
 {
     const INFO *info = syscall_info(call->no);
     if (info == NULL)

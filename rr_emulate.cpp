@@ -261,7 +261,7 @@ static intptr_t emulate_syscall(const SYSCALL *call)
         if (arg == A___)
             break;
         uint8_t mask = (MI_____ << i);
-        bool output = syscall_output(call, i);
+        bool output = syscall_is_output(call, i);
         if (output || !syscall_used(call, i))
             continue;
         size_t size = 0;
@@ -452,7 +452,7 @@ static int emulate_hook(STATE *state)
                 if (arg == A___)
                     break;
                 fd = (arg == A_FD? call->args[i].fd: fd);
-                bool output = syscall_output(call, i);
+                bool output = syscall_is_output(call, i);
                 if (!syscall_used(call, i))
                     continue;
                 size_t size = 0;
