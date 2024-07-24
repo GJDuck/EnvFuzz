@@ -427,7 +427,7 @@ static int queue_emulate_select(int nfds, fd_set *rfds, fd_set *wfds,
     }
     nfds = j;
     int r = queue_emulate_poll(fds, nfds, timeout);
-    if (r <= 0)
+    if (r < 0)
         return r;
     r = 0;
     for (int i = 0, k = 0; k < nfds; i++)
