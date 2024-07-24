@@ -29,10 +29,12 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <elf.h>
 #include <fcntl.h>
 #include <ftw.h>
 #include <getopt.h>
 #include <sched.h>
+#include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -141,6 +143,131 @@ static int64_t parseInt(const char *name, const char *val, int64_t lb,
         error("failed to parse `--%s' option; expected integer within the "
             "range %zd..%zd; found \"%s\"", name, lb, ub, val);
     return r;
+}
+
+/*
+ * Read information from the ELF file.
+ */
+static void parseELF(const char *filename, std::string &path,
+    std::string &interpreter)
+{
+    // Step (1): Parse the PATH environment variable
+    const char *pathval = getenv("PATH");
+    switch (filename[0])
+    {
+        default:
+            if (pathval != nullptr)
+            {
+                std::string pathstr = pathval;
+                std::string::size_type start = 0, end = 0;
+                bool found = false;
+                while ((end = pathstr.find(':', start)) != std::string::npos)
+                {
+                    std::string candidate(pathstr, start, end - start);
+                    if (candidate.size() == 0 || candidate.back() != '/')
+                        candidate += '/';
+                    candidate += filename;
+                    if (access(candidate.c_str(), X_OK) == 0)
+                    {
+                        found = true;
+                        path.swap(candidate);
+                        break;
+                    }
+                    start = end + 1;
+                }
+                if (found)
+                    break;
+            }
+            // Fallthrough
+        case '/': case '.':
+            path = filename;
+            break;
+    }
+    filename = path.c_str();
+
+    // Step (2): Parse the ELF file
+    int fd = open(filename, O_RDONLY, 0);
+    if (fd < 0)
+        error("failed to open file \"%s\" for reading: %s", filename,
+            strerror(errno));
+
+    struct stat stat;
+    if (fstat(fd, &stat) != 0)
+        error("failed to get statistics for file \"%s\": %s", filename,
+            strerror(errno));
+
+    size_t size = (size_t)stat.st_size;
+    void *ptr = mmap(NULL, size, MAP_SHARED | MAP_NORESERVE, PROT_READ, fd, 0);
+    if (ptr == MAP_FAILED)
+        error("failed to map file \"%s\" into memory: %s", filename,
+            strerror(errno));
+    close(fd);
+    const uint8_t *data = (const uint8_t *)ptr;
+    const uint8_t *end  = data + size;
+
+    /*
+     * Basic ELF file parsing.
+     */
+    if (size < sizeof(Elf64_Ehdr))
+        error("failed to parse ELF EHDR from file \"%s\"; file is too small",
+            filename);
+    const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)data;
+    if (ehdr->e_ident[EI_MAG0] != ELFMAG0 ||
+            ehdr->e_ident[EI_MAG1] != ELFMAG1 ||
+            ehdr->e_ident[EI_MAG2] != ELFMAG2 ||
+            ehdr->e_ident[EI_MAG3] != ELFMAG3)
+        error("failed to parse ELF file \"%s\"; invalid magic number",
+            filename);
+    if (ehdr->e_ident[EI_CLASS] != ELFCLASS64)
+        error("failed to parse ELF file \"%s\"; file is not 64bit",
+            filename);
+    if (ehdr->e_ident[EI_DATA] != ELFDATA2LSB)
+        error("failed to parse ELF file \"%s\"; file is not little endian",
+            filename);
+    if (ehdr->e_ident[EI_VERSION] != EV_CURRENT)
+        error("failed to parse ELF file \"%s\"; invalid version",
+            filename);
+    if (ehdr->e_machine != EM_X86_64)
+        error("failed to parse ELF file \"%s\"; file is not x86_64",
+            filename);
+    if (ehdr->e_phoff < sizeof(Elf64_Ehdr) || ehdr->e_phoff >= size)
+        error("failed to parse ELF file \"%s\"; invalid program header "
+            "offset", filename);
+    if (ehdr->e_phnum > PN_XNUM)
+        error("failed to parse ELF file \"%s\"; too many program headers",
+            filename);
+    if (ehdr->e_phoff < sizeof(Elf64_Ehdr) ||
+        ehdr->e_phoff + ehdr->e_phnum * sizeof(Elf64_Phdr) > size)
+        error("failed to parse ELF file \"%s\"; invalid program headers",
+            filename);
+
+    const Elf64_Phdr *phdrs = (const Elf64_Phdr *)(data + ehdr->e_phoff);
+    size_t phnum = (size_t)ehdr->e_phnum;
+    bool found = false;
+    for (size_t i = 0; !found && i < phnum; i++)
+    {
+        const Elf64_Phdr *phdr = phdrs + i;
+        switch (phdr->p_type)
+        {
+            case PT_INTERP:
+            {
+                const char *interp = (char *)(data + phdr->p_offset);
+                if (interp + phdr->p_memsz > (char *)end ||
+                        strlen(interp) != phdr->p_memsz-1)
+                    error("failed to parse ELF file \"%s\"; invalid "
+                        "interpreter", filename);
+                interpreter = interp;
+                found = true;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    if (!found)
+        error("failed to parse ELF file \"%s\"; not dynamically linked",
+            filename);
+    (void)munmap(ptr, size);
 }
 
 /*
@@ -947,14 +1074,19 @@ int main(int argc, char **argv, char **envp)
                 }
             }
 
-            // Set the environment (envp):
+            // Construct and execute the command:
             setEnv(option_replay, option_pcapname, envp);
-            std::string libpath("LD_LIBRARY_PATH=");
-            libpath += libname;
-            if (putenv((char *)libpath.c_str()) != 0)
-                error("failed to set environment \"%s\": %s", libpath.c_str(),
-                    strerror(errno));
-            execvp(progname.c_str(), argv+optind);
+            std::string path, interp;
+            parseELF(progname.c_str(), path, interp);
+            std::vector<const char *> args;
+            args.push_back(interp.c_str());
+            args.push_back("--library-path");
+            args.push_back(libname.c_str());
+            args.push_back(path.c_str());
+            for (int i = optind+1; argv[i] != nullptr; i++)
+                args.push_back(argv[i]);
+            args.push_back(nullptr);
+            execvp(interp.c_str(), (char * const *)args.data());
             error("failed to execute \"%s\" (from directory \"%s\"): %s",
                 progname.c_str(), option_dir.c_str(), strerror(errno));
         }
