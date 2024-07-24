@@ -293,6 +293,23 @@ static int emulate_hook(STATE *state)
 
     switch (call->no)
     {
+        case SYS_open: case SYS_openat:
+        {
+            const char *path =
+                (call->no == SYS_open? call->arg0.path: call->arg1.path);
+            int flags =
+                (call->no == SYS_open? call->arg1.flags: call->arg2.flags);
+            int mode = (call->no == SYS_open? call->arg2.i32: call->arg3.i32);
+            int fd = fd_alloc();
+            if (fd < 0 || (mode & O_ACCMODE) == O_RDONLY)
+            {
+                call->result = -ENOENT;
+                break;
+            }
+            (void)fd_open(fd, S_IFREG, SOCK_STREAM, flags, path);
+            call->result = fd;
+            break;
+        }
         case SYS_close:
             call->result = (fd_close(call->arg0.fd)? 0: -EBADF);
             break;

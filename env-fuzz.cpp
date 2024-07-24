@@ -1045,6 +1045,8 @@ int main(int argc, char **argv, char **envp)
         if (child == 0)
         {
             // Prepare debugger (if necessary):
+            std::string path, interp;
+            parseELF(progname.c_str(), path, interp);
             if (option_debug)
             {
                 child = fork();
@@ -1066,7 +1068,7 @@ int main(int argc, char **argv, char **envp)
                             "gdb",
                             "-x",
                             "env-fuzz.gdb",
-                            progname.c_str(),
+                            interp.c_str(),
                             std::to_string(child).c_str(),
                             nullptr);
                         error("failed to execute GDB: %s", strerror(errno));
@@ -1076,8 +1078,6 @@ int main(int argc, char **argv, char **envp)
 
             // Construct and execute the command:
             setEnv(option_replay, option_pcapname, envp);
-            std::string path, interp;
-            parseELF(progname.c_str(), path, interp);
             std::vector<const char *> args;
             args.push_back(interp.c_str());
             args.push_back("--library-path");

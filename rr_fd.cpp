@@ -64,6 +64,7 @@ struct NAME
 static void *FD_TABLE   = NULL;
 static void *NAME_TABLE = NULL;
 static int fd_next      = 0;  // Next free port;
+static uint64_t fd_use  = 0x0;
 
 /*
  * (Simplified) regular expression matching.
@@ -255,6 +256,7 @@ static ENTRY *fd_open(int fd, int filetype, int socktype, int flags,
         error("failed to open input %s; file descriptor %d is already open",
             name, fd);
     E->name = name_set(E->port, name);
+    fd_use ^= ((size_t)fd > 8 * sizeof(fd_use)? 0x0: 1ull << (unsigned)fd);
     return E;
 }
 
@@ -267,6 +269,7 @@ static ENTRY *fd_eventfd(int fd, unsigned val, int flags, const char *name)
     E->event.enabled   = true;
     E->event.semaphore = ((flags & /*EFD_SEMAPHORE=*/00000001) != 0);
     E->event.val       = val;
+    E->mutate          = false;
     return E;
 }
 
@@ -301,7 +304,15 @@ static bool fd_close(int fd)
         return false;
     (void)tdelete(E, &FD_TABLE, fd_compare);
     xfree(E);
+    fd_use ^= ((size_t)fd > 8 * sizeof(fd_use)? 0x0: 1ull << (unsigned)fd);
     return true;
+}
+
+static int fd_alloc(void)
+{
+    if (fd_use == 0xFFFFFFFFFFFFFFFFull)
+        return -1;
+    return __builtin_ctzll(~fd_use);
 }
 
 static ENTRY *fd_dup(const ENTRY *E, int fd)
