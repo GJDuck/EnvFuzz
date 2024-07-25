@@ -176,7 +176,6 @@ static const char *syscall_get_str(const SYSCALL *call, int idx)
     }
 }
 
-
 static int syscall_compare(const void *a, const void *b)
 {
     const SYSCALL *A = (SYSCALL *)a;
@@ -185,8 +184,10 @@ static int syscall_compare(const void *a, const void *b)
         return (A->no - B->no);
     switch (A->no)
     {
-        case SYS_stat: case SYS_lstat:
+        case SYS_stat: case SYS_lstat: case SYS_open:
             return strcmp(syscall_get_str(A, 0), syscall_get_str(B, 0));
+        case SYS_openat:
+            return strcmp(syscall_get_str(A, 1), syscall_get_str(B, 1));
         case SYS_getrlimit: case SYS_getrusage:
             return A->arg0.i32 - B->arg0.i32;
         default:
@@ -228,10 +229,17 @@ static void emulate_set_syscall(const SYSCALL *call)
             (void)aux_get(aux, (uint8_t *)&INFO_sgid, sizeof(INFO_sgid),
                 M__I___, A_IP);
             break;
-        case SYS_stat: case SYS_lstat:
-        case SYS_access: case SYS_uname:
-        case SYS_getrlimit: case SYS_getrusage:
+        case SYS_open: case SYS_openat:
+            if (syscall_get_str(call, (call->no == SYS_open? 0: 1)) == NULL ||
+                    aux_int(aux, MR_, APRT) < 0)
+                break;
+            (void)tsearch((void *)call, &INFO_syscall, syscall_compare);
+            break;
+        case SYS_stat: case SYS_lstat: case SYS_access:
             if (syscall_get_str(call, 0) == NULL) break;
+            (void)tsearch((void *)call, &INFO_syscall, syscall_compare);
+            break;
+        case SYS_uname: case SYS_getrlimit: case SYS_getrusage:
             (void)tsearch((void *)call, &INFO_syscall, syscall_compare);
             break;
         default:
@@ -300,14 +308,24 @@ static int emulate_hook(STATE *state)
             int flags =
                 (call->no == SYS_open? call->arg1.flags: call->arg2.flags);
             int mode = (call->no == SYS_open? call->arg2.i32: call->arg3.i32);
-            int fd = fd_alloc();
-            if (fd < 0 || (mode & O_ACCMODE) == O_RDONLY)
+            call->result = fd_alloc();
+            if (call->result < 0)
+                break;
+            if ((mode & O_ACCMODE) == O_WRONLY)
+                break;
+            void *node = tfind(call, &INFO_syscall, syscall_compare);
+            if (node == NULL)
             {
                 call->result = -ENOENT;
                 break;
             }
-            (void)fd_open(fd, S_IFREG, SOCK_STREAM, flags, path);
-            call->result = fd;
+            const SYSCALL *exp = *(SYSCALL **)node;
+            const AUX *aux = exp->aux;
+            ENTRY *E = fd_open(call->result, S_IFREG, SOCK_STREAM, flags,
+                path);
+            E->port = aux_int(aux, MR_, APRT);
+//            fprintf(stderr, "%sOPEN%s(%s) = %d\n", BLUE, OFF, path,
+//                call->result);
             break;
         }
         case SYS_close:

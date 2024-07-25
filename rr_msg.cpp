@@ -206,13 +206,13 @@ static ssize_t queue_emulate_read(iovec *iov, size_t iovcnt, int fd)
     {
         switch (E->eof++)
         {
-            case 0:
+            case 0: case 1:
                 return (E->filetype == S_IFSOCK? -ECONNRESET: 0);
-            case 1: 
+            case 2: 
                 if (E->filetype != S_IFSOCK)
                     return -EIO;
                 // Fallthrough:
-            case 2:
+            default:
                 error("program-under-test ignores EOF for (%s)", E->name);
         }
     }
@@ -315,14 +315,17 @@ retry: {}
                 fds[i].revents = revents;
                 count++;
             }
+            seen++;
             continue;
         }
         MSG *M = queue_peek(Q, E->port);
         if (M == NULL)
         {
+            E->eof++;
+            if (E->eof > 4)
+                error("program-under-test ignores EOF for (%s)", E->name);
             hup++;
-            fds[i].revents =
-                (E->eof > 0 && E->filetype == S_IFSOCK? POLLERR: POLLHUP);
+            fds[i].revents = (E->filetype == S_IFSOCK? POLLERR: POLLHUP);
             continue;
         }
         if ((fds[i].events & (POLLIN | POLLOUT)) == 0x0)
@@ -370,6 +373,8 @@ retry: {}
         if ((fds[i].events & POLLIN) == 0)
             continue;
         ENTRY *E = fd_entry(fds[i].fd);
+        if (E->event.enabled)
+            continue;
         MSG *M = queue_peek(Q, E->port);
         ssize_t d = 0;
         for (MSG *N = M->next; d < min_d && N != M; N = N->next)
@@ -397,7 +402,8 @@ retry: {}
             continue;
         ENTRY *E = fd_entry(fds[i].fd);
         queue_purge(Q, E->port);
-        fds[i].revents = POLLHUP;
+        fds[i].revents = POLLERR;
+        E->eof++;
     }
     return 0;
 }

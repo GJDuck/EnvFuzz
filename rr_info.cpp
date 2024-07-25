@@ -1337,6 +1337,16 @@ static const uint8_t *aux_data(const AUX *aux, uint8_t mask, unsigned kind)
     if (aux == NULL) return NULL;
     return aux->data;
 }
+static const char *aux_str(const AUX *aux, uint8_t mask, unsigned kind)
+{
+    return (const char *)aux_data(aux, mask, kind);
+}
+static int aux_int(const AUX *aux, uint8_t mask, unsigned kind)
+{
+    int r;
+    if (!aux_get(aux, (uint8_t *)&r, sizeof(r), mask, kind)) return -1;
+    return r;
+}
 
 static bool aux_check(const AUX *aux, const uint8_t *buf, size_t size,
     uint8_t mask, unsigned kind)

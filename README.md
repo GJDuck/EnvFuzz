@@ -61,7 +61,7 @@ How EnvFuzz Works?
 ------------------
 
 EnvFuzz is based on an underlying full environmental *Record and Replay* (rr)
-and fuzzing infrastructure (RR+Fuzzing=RRFuzz).
+and fuzzing infrastructure.
 The infrastructure is based on the insight that, for typical user-mode
 programs, all environmental interactions pass through the kernel-user mode
 interface.
@@ -184,8 +184,8 @@ all `syscall` instructions in `libc`.
 * https://github.com/GJDuck/e9patch
 
 Thus, whenever the program invokes a system call (e.g., `open`, `read`,
-`write`, etc.), the call will be diverted to our record-and-replay infrastructure
-(RR+Fuzzing=RRFuzz).
+`write`, etc.), the call will be diverted to our record-and-replay
+infrastructure.
 For recording, the infrastructure acts as a *man-in-the-middle* between user
 and kernel-mode, and all interactions are saved to a file.
 For replay (with fuzzing), the program is (repeatedly) executed again, but
@@ -217,9 +217,9 @@ For example, the related `rr-debug` project estimates a total of *five
 person-years total* ([source](https://arxiv.org/pdf/1705.05937)) was spent on
 development (as of 2017), and even then it cannot perfectly record and replay
 all programs.
-Our underlying RRFuzz framework has not nearly had as much development time, and
-the current implementation should be viewed as a "research prototype"
-that will not necessarily work for all programs.
+Our underlying record and eplay framework has not nearly had as much
+development time, and the current implementation should be viewed as a
+"research prototype" that will not necessarily work for all programs.
 Nevertheless, we provide the system "as-is", *since EnvFuzz has been proven
 effective at finding bugs that other fuzzers cannot detect*, even if the
 implementation is not fully polished.
@@ -234,7 +234,7 @@ Please keep in mind that EnvFuzz is alpha-quality software and a research protot
 
 Please report obvious bugs here:
 
-* https://github.com/GJDuck/RRFuzz/issues
+* https://github.com/GJDuck/EnvFuzz/issues
 
 Issues relating to unexpected divergence during replay should generally not be
 reported.

@@ -826,17 +826,14 @@ static void replay_init(void)
         const SYSCALL *call = (SYSCALL *)M->payload;
         const AUX *aux = call->aux;
         aux_validate(aux, M->len - sizeof(SYSCALL));
-        char buf[BUFSIZ];
+        const char *name;
         int port;
-        if (aux_get(aux, (uint8_t *)&port, sizeof(port), MR_, APRT) &&
-                aux_get(aux, (uint8_t *)buf, sizeof(buf)-1, MR_, ANAM))
-            name_set(port, buf, /*replace=*/true);
-        if (aux_get(aux, (uint8_t *)&port, sizeof(port), M_R, APRT) &&
-                aux_get(aux, (uint8_t *)buf, sizeof(buf)-1, M_R, ANAM))
-            name_set(port, buf, /*replace=*/true);
-        // PRINTER P;
-        // print_aux_syscall(P, call);
-        // fprintf(stderr, "%s\n", P.str());
+        if ((name = aux_str(aux, MR_, ANAM)) != nullptr &&
+                (port = aux_int(aux, MR_, APRT)) > 0)
+            name_set(port, name, /*replace=*/true);
+        if ((name = aux_str(aux, M_R, ANAM)) != nullptr &&
+                (port = aux_int(aux, M_R, APRT)) > 0)
+            name_set(port, name, /*replace=*/true);
         emulate_set_syscall(call);
         if (M->next == H)
             break;

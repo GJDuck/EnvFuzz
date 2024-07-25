@@ -311,7 +311,7 @@ static bool fd_close(int fd)
 static int fd_alloc(void)
 {
     if (fd_use == 0xFFFFFFFFFFFFFFFFull)
-        return -1;
+        return -ENOENT;
     return __builtin_ctzll(~fd_use);
 }
 
@@ -382,12 +382,16 @@ static int fd_epoll_ctl(int efd, int op, int fd,
 
 static short eventfd_emulate_poll(ENTRY *E)
 {
+    if (E->eof > 0)
+        error("program-under-test ignores EOF for (%s)", E->name);
     uint64_t max = UINT64_MAX-1;
     return (E->event.val > 0?    POLLIN:  0x0) |
            (E->event.val != max? POLLOUT: 0x0);
 }
 static ssize_t eventfd_emulate_read(ENTRY *E, iovec *iov, size_t iovcnt)
 {
+    if (E->eof > 0)
+        error("program-under-test ignores EOF for (%s)", E->name);
     size_t size = iov_len(iov, iovcnt);
     if (size < sizeof(uint64_t))
         return -EINVAL;
@@ -426,6 +430,8 @@ static void eventfd_check_read(ENTRY *E, iovec *iov, size_t iovcnt)
 }
 static ssize_t eventfd_emulate_write(ENTRY *E, const iovec *iov, size_t iovcnt)
 {
+    if (E->eof > 0)
+        error("program-under-test ignores EOF for (%s)", E->name);
     size_t size = iov_len(iov, iovcnt);
     if (size < sizeof(uint64_t))
         return -EINVAL;

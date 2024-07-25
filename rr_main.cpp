@@ -214,14 +214,12 @@ void rdtscp_hook(void *arg)
  */
 void abort_hook(void)
 {
-    // During reply, unexpected aborts should immediately generate a SIGABRT.
-    // The glibc version of abort() tends to call other syscalls first, which
-    // could confuse the replay.
-    if (REPLAY)
-    {
-        SIGNAL_UNBLOCK(SIG_MASK(SIGABRT));
-        abort();
-    }
+    // Unexpected aborts should immediately generate a SIGABRT.  The glibc
+    // version of abort() tends to call other syscalls first, which could
+    // confuse the replay.
+    SIGNAL_UNBLOCK(SIG_MASK(SIGABRT));
+    if (RECORD) THREAD_UNLOCK();
+    abort();
 }
 
 /*
