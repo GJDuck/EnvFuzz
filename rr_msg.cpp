@@ -142,7 +142,7 @@ static void queue_purge(QUEUE *Q, int port)
 /*
  * Get input from the queue.
  */
-static ssize_t queue_get(iovec *iov, size_t iovcnt, int fd)
+static ssize_t queue_read(iovec *iov, size_t iovcnt, int fd)
 {
     ENTRY *E = fd_get(fd);
     QUEUE *Q = option_Q;
@@ -183,12 +183,12 @@ static ssize_t queue_get(iovec *iov, size_t iovcnt, int fd)
         eventfd_check_read(E, iov, iovcnt);
     return r;
 }
-static ssize_t queue_get(uint8_t *buf, size_t size, int fd)
+static ssize_t queue_read(uint8_t *buf, size_t size, int fd)
 {
     struct iovec iov;
     iov.iov_base = (void *)buf;
     iov.iov_len  = size;
-    return queue_get(&iov, 1, fd);
+    return queue_read(&iov, 1, fd);
 }
 
 /*
@@ -223,6 +223,8 @@ static ssize_t queue_emulate_read(iovec *iov, size_t iovcnt, int fd)
     MSG *N = M;
     if (option_patch)
         M = patch_next(M, option_P);
+    if (option_fuzz && E->mutate)
+        M = fuzzer_mutate(E, M);
     if (M != N && option_fuzz)
         FUZZ->patch->push_back(M);
 
@@ -289,7 +291,7 @@ static int queue_emulate_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 {
     if (nfds < 0) return -EINVAL;
     if (nfds == 0) return 0;
-    bool retry = false;
+    bool retry = true;
 
     // Step (1): Satisfy the request "normally":
 retry: {}
@@ -307,6 +309,8 @@ retry: {}
             fds[i].revents = POLLNVAL;
             continue;
         }
+//        fprintf(stderr, "%sPOLL%s: %s [%d]\n", BLUE, OFF, E->name,
+//            E->fd);
         if (E->event.enabled)
         {
             short revents = (fds[i].events & eventfd_emulate_poll(E));
@@ -344,6 +348,7 @@ retry: {}
     // Step (2): Try switching threads:
     if (retry)
     {
+//        fprintf(stderr, "%sBLOCK%s\n", BLUE, OFF);
         retry = false;
         FIBER_NEXT();
         goto retry;

@@ -541,6 +541,7 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
         switch (sig)
         {
             case SIGABRT: fprintf(stderr, "%sABRT%s", YELLOW, OFF); break;
+            case SIGTRAP: fprintf(stderr, "%sTRAP%s", YELLOW, OFF); break;
             case SIGKILL: fprintf(stderr, "%sHANG%s", YELLOW, OFF); break;
             default:
                 fprintf(stderr, "%s%s%s", RED, signal_name4(sig), OFF);
@@ -552,6 +553,11 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
             case SIGABRT:
                 P.format("%s/abort/ABORT_%.4x_m%.5d.patch", option_outname,
                     bugid, FUZZ->id);
+                FUZZ->aborts += patch_save(P.str(), FUZZ->patch);
+                break;
+            case SIGTRAP:
+                P.format("%s/abort/%s_%.4x_m%.5d.patch", option_outname,
+                    signal_name(sig), bugid, FUZZ->id);
                 FUZZ->aborts += patch_save(P.str(), FUZZ->patch);
                 break;
             case SIGKILL:

@@ -1421,20 +1421,20 @@ static void print_arg(PRINTER &P, const INFO *info, uint8_t arg,
     }
 }
 static bool print_arg(PRINTER &P, const INFO *info, const SYSCALL *call,
-    int idx)
+    int idx, bool exe = true)
 {
     uint8_t arg = info->args[idx];
     if (arg == A___)
         return false;
     bool input = ((info->mask & (0x1 << idx)) != 0);
-    if (input && call->result < 0)
+    if (input && (!exe || call->result < 0))
     {
         P.put("???");
         return true;
     }
     if (!syscall_used(call, idx))
     {
-        P.put("<unused>");
+        P.put("...");
         return true;
     }
     intptr_t val = call->args[idx].val;
@@ -1514,7 +1514,7 @@ void print_result(PRINTER &P, const SYSCALL *call)
 /*
  * Print a syscall.
  */
-static void print_syscall(PRINTER &P, const SYSCALL *call)
+static void print_syscall(PRINTER &P, const SYSCALL *call, bool exe = true)
 {
     P.format("%s(", syscall_name(call->no));
     int n = syscall_arity(call);
@@ -1522,10 +1522,13 @@ static void print_syscall(PRINTER &P, const SYSCALL *call)
     for (int i = 0; i < n; i++)
     {
         P.put(i > 0? ",": "");
-        print_arg(P, info, call, i);
+        print_arg(P, info, call, i, exe);
     }
     P.put(") = ");
-    print_result(P, call);
+    if (exe)
+        print_result(P, call);
+    else
+        P.put("???");
 }
 
 /*

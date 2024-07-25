@@ -328,6 +328,11 @@ static int emulate_hook(STATE *state)
 //                call->result);
             break;
         }
+        case SYS_eventfd: case SYS_eventfd2:
+            call->result = eventfd_emulate_open(
+                call->arg0.u32,
+                (call->no == SYS_eventfd2? call->arg1.flags: 0x0));
+            break;
         case SYS_close:
             call->result = (fd_close(call->arg0.fd)? 0: -EBADF);
             break;

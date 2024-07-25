@@ -238,7 +238,7 @@ static ENTRY *fd_open(int fd, int filetype, int socktype, int flags,
 {
     if (fd < 0)
         return NULL;
-    if (fd_next >= UINT16_MAX)
+    if (RECORD && fd_next >= UINT16_MAX)
         error("failed to assign new port; maxium port number (%u) exceeded",
             UINT16_MAX);
     ENTRY *E = (ENTRY *)xmalloc(sizeof(struct ENTRY));
@@ -442,5 +442,13 @@ static ssize_t eventfd_emulate_write(ENTRY *E, const iovec *iov, size_t iovcnt)
         return -EAGAIN;
     E->event.val += val;
     return sizeof(uint64_t);
+}
+static int eventfd_emulate_open(unsigned val, int flags)
+{
+    int fd = fd_alloc();
+    if (fd < 0)
+        return fd;
+    (void)fd_eventfd(fd, val, flags, "event://EMULATED");
+    return fd;
 }
 

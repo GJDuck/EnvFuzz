@@ -169,6 +169,7 @@ static void queue_validate(const SYSCALL *exp, int i, uint8_t arg, int fd,
  */
 static bool validate(const SYSCALL *exp, const SYSCALL *call)
 {
+    PRINTER P, Q;
     if (option_patch || (option_fuzz && fuzzer_state == FUZZ_LEAF))
     {
         if (option_emulate >= 2 &&
@@ -176,15 +177,19 @@ static bool validate(const SYSCALL *exp, const SYSCALL *call)
         {
             // Likely behaviour divergence due to mutation:
             fuzzer_emulate = true;
+            fd_next = UINT16_MAX+1;
             if (option_log >= 3)
-                fprintf(stderr, "#%d \33[34mDESYNC\33[0m(%s) = %s\n",
-                    fiber_self()->id, syscall_name(exp->no),
-                    syscall_name(call->no));
+            {
+                print_aux_syscall(P, exp);
+                print_syscall(Q, call, /*exe=*/false);
+                fprintf(stderr, "%sDESYNC%s:\n"
+                    "\texpected %s%s%s\n\tgot      %s%s%s\n",
+                    BLUE, OFF, YELLOW, P.str(), OFF, YELLOW, Q.str(), OFF);
+            }
             return false;
         }
     }
 
-    PRINTER P, Q;
     if (call->no != exp->no)
     {
         print_aux_syscall(P, exp);
@@ -374,7 +379,7 @@ mmap_error:
     if (size <= MMAP_RECORD_MAX)
     {
         // Read file from queue:
-        ssize_t s = queue_get(buf, size, fd);
+        ssize_t s = queue_read(buf, size, fd);
         if (s < 0)
         {
             r = s;
@@ -711,17 +716,17 @@ static int replay_hook(STATE *state)
                         if (io)
                         {
                             call->result = state->rax =
-                                queue_get(buf, size, fd);
+                                queue_read(buf, size, fd);
                         }
                         else if (!aux_get(aux, buf, size, mask, arg))
                             goto error;
                         break;
                     case AIOV:
-                        call->result = state->rax = queue_get(iov, iovcnt, fd);
+                        call->result = state->rax = queue_read(iov, iovcnt, fd);
                         break;
                     case AMSG:
                         call->result = state->rax =
-                            queue_get(msg->msg_iov, msg->msg_iovlen, fd);
+                            queue_read(msg->msg_iov, msg->msg_iovlen, fd);
                         if (!aux_get(aux, msg, mask, arg))
                             goto error;
                         if ((msg->msg_flags & /*MSG_TRUNC=*/0x20) != 0 &&
@@ -730,7 +735,7 @@ static int replay_hook(STATE *state)
                         break;
                     case A_MM:
                         call->result = state->rax =
-                            queue_get(mmsg->msg_hdr.msg_iov,
+                            queue_read(mmsg->msg_hdr.msg_iov,
                                 mmsg->msg_hdr.msg_iovlen, fd);
                         if (!aux_get(aux, &mmsg->msg_hdr, mask, arg))
                             goto error;
