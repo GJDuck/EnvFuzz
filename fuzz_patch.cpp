@@ -91,19 +91,27 @@ struct PATCH                    // Patch representation
     /*
      * Saves the patch to disk.
      */
-    void save(const char *patchname)
+    bool save(const char *patchname)
     {
         assert(filename == NULL && !disk);
+        int fd = open(patchname, O_WRONLY | O_CREAT | O_EXCL, 0777);
+        if (fd < 0)
+        {
+            if (errno == EEXIST)
+                return false;
+            error("failed to open file \"%s\" for writing: %s", patchname,
+                strerror(errno));
+        }
         size_t len = strlen(patchname);
         filename = (char *)pmalloc(len+1);
         memcpy((void *)filename, patchname, len+1);
-
-        FILE *stream = fopen(filename, "w");
+        FILE *stream = fdopen(fd, "w");
         if (stream == NULL)
             error("failed to open file \"%s\" for writing: %s", filename,
                 strerror(errno));
         messages_save(stream, head);
         fclose(stream);
+        return true;
     }
 
     /*
@@ -115,7 +123,7 @@ struct PATCH                    // Patch representation
             return;
         FILE *stream = fopen(filename, "r");
         if (stream == NULL)
-            error("failed to open file \"%s\" for writing: %s", filename,
+            error("failed to open file \"%s\" for reading: %s", filename,
                 strerror(errno));
         head = messages_load(filename, stream);
         fclose(stream);
@@ -147,10 +155,9 @@ struct CORPUS                   // Set of patches
     /*
      * Insert a patch into the corpus.
      */
-    void insert(HASH K, PATCH *P)
+    bool insert(HASH K, PATCH *P)
     {
         assert(P->head != NULL);
-        head.merge(P);
         
         // Create the patch filename:
         PRINTER Q;
@@ -160,7 +167,10 @@ struct CORPUS                   // Set of patches
                 strerror(errno));
         Q.format("m%.5zu_%.16lx%.16lx.patch", P->head->id,
             (uint64_t)(K >> 64), (uint64_t)K);
-        P->save(Q.str());
+        if (!P->save(Q.str()))
+            return false;
+        head.merge(P);
+        return true;
     }
 };
 
@@ -275,7 +285,7 @@ static void patch_append(const char *filename, const MSG *M)
 {
     FILE *stream = fopen(filename, "a");
     if (stream == NULL)
-        error("failed to open file \"%s\" for writing: %s", filename,
+        error("failed to open file \"%s\" for appending: %s", filename,
             strerror(errno));
     message_write(stream, M);
     fclose(stream);

@@ -453,7 +453,8 @@ boring_patch:
 
     // Save interesting patch to the corpus:
     P->cov = cov;
-    B->corpus.insert(K, P);
+    if (!B->corpus.insert(K, P))
+        goto boring_patch;
 
     if (out)
     {
