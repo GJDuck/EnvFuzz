@@ -67,56 +67,62 @@ static int replay_hook(STATE *state);
 static void signal_segv_handler(int sig, siginfo_t *info, void *ctx_0)
 {
     intptr_t *ctx = (intptr_t *)ctx_0;
-    const uint8_t *rip = (uint8_t *)ctx[REG_RIP];
-    uint8_t tmp[3];
 
-    // Check for & handle rdtsc(p) instruction(s):
-    for (size_t i = sizeof(tmp); i >= 2; i--)
+    if (info->si_code == /*SI_KERNEL=*/0x80)
     {
-        memset(tmp, 0x0, sizeof(tmp));
-        safe_memcpy(tmp, rip, i);
-    }
-    bool rdtsc  = (tmp[0] == 0x0f && tmp[1] == 0x31);
-    bool rdtscp = (tmp[0] == 0x0f && tmp[1] == 0x01 && tmp[2] == 0xf9);
-    bool cpuid  = (tmp[0] == 0x0f && tmp[1] == 0xa2);
-    if (rdtsc || rdtscp)
-    {
-        STATE state;
-        state_init(ctx_0, &state);
-        state.rax = SYS_rdtsc;
-        int r = (RECORD? record_hook(&state): replay_hook(&state));
-        assert(r == REPLACE);
-        uint64_t result = (uint64_t)state.rax;
-        ctx[REG_RAX] = result & 0xFFFFFFFFull;
-        ctx[REG_RDX] = result >> 32;
-        if (rdtscp)
-            ctx[REG_RCX] = option_cpu;
-        ctx[REG_RIP] += (rdtsc? /*sizeof(rdtsc)=*/2: /*sizeof(rdtscp)=*/3);
-        return;     // Continue
-    }
-    if (cpuid)
-    {
-        if (syscall(SYS_arch_prctl, /*ARCH_SET_CPUID=*/0x1012, 0x1) < 0)
-            error("failed to disable cpuid interception: %s", strerror(errno));
-        intptr_t rax = ctx[REG_RAX], rcx = ctx[REG_RCX];
-        uint32_t eax, ebx, ecx, edx;
-        asm volatile
-        (
-            "cpuid"
-            : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx) : "a" (rax), "c" (rcx)
-        );
-        if (syscall(SYS_arch_prctl, /*ARCH_SET_CPUID=*/0x1012, 0x0) < 0)
-            error("failed to enable cpuid interception: %s", strerror(errno));
-        if (rax == 0x1)
-            ecx &= ~(1u << 30);                 // Disable rdrand
-        if (rax == 0x7 && rcx == 0x0)
-            ebx &= ~((1u << 18) | (1u << 11));  // Disable rdseed & rtm
-        ctx[REG_RAX] = eax;
-        ctx[REG_RBX] = ebx;
-        ctx[REG_RCX] = ecx;
-        ctx[REG_RDX] = edx;
-        ctx[REG_RIP] += /*sizeof(cpuid)=*/2;
-        return;     // Continue
+        // Check for & handle rdtsc(p) instruction(s):
+        const uint8_t *rip = (uint8_t *)ctx[REG_RIP];
+        uint8_t tmp[3];
+        for (size_t i = sizeof(tmp); i >= 2; i--)
+        {
+            memset(tmp, 0x0, sizeof(tmp));
+            safe_memcpy(tmp, rip, i);
+        }
+        bool rdtsc  = (tmp[0] == 0x0f && tmp[1] == 0x31);
+        bool rdtscp = (tmp[0] == 0x0f && tmp[1] == 0x01 && tmp[2] == 0xf9);
+        bool cpuid  = (tmp[0] == 0x0f && tmp[1] == 0xa2);
+        if (rdtsc || rdtscp)
+        {
+            STATE state;
+            state_init(ctx_0, &state);
+            state.rax = SYS_rdtsc;
+            int r = (RECORD? record_hook(&state): replay_hook(&state));
+            assert(r == REPLACE);
+            uint64_t result = (uint64_t)state.rax;
+            ctx[REG_RAX] = result & 0xFFFFFFFFull;
+            ctx[REG_RDX] = result >> 32;
+            if (rdtscp)
+                ctx[REG_RCX] = option_cpu;
+            ctx[REG_RIP] += (rdtsc? /*sizeof(rdtsc)=*/2: /*sizeof(rdtscp)=*/3);
+            return;     // Continue
+        }
+        if (cpuid)
+        {
+            if (syscall(SYS_arch_prctl, /*ARCH_SET_CPUID=*/0x1012, 0x1) < 0)
+                error("failed to disable cpuid interception: %s",
+                    strerror(errno));
+            intptr_t rax = ctx[REG_RAX], rcx = ctx[REG_RCX];
+            uint32_t eax, ebx, ecx, edx;
+            asm volatile
+            (
+                "cpuid"
+                : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)
+                : "a" (rax), "c" (rcx)
+            );
+            if (syscall(SYS_arch_prctl, /*ARCH_SET_CPUID=*/0x1012, 0x0) < 0)
+                error("failed to enable cpuid interception: %s",
+                    strerror(errno));
+            if (rax == 0x1)
+                ecx &= ~(1u << 30);                 // Disable rdrand
+            if (rax == 0x7 && rcx == 0x0)
+                ebx &= ~((1u << 18) | (1u << 11));  // Disable rdseed & rtm
+            ctx[REG_RAX] = eax;
+            ctx[REG_RBX] = ebx;
+            ctx[REG_RCX] = ecx;
+            ctx[REG_RDX] = edx;
+            ctx[REG_RIP] += /*sizeof(cpuid)=*/2;
+            return;     // Continue
+        }
     }
 
     // Re-raise:

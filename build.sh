@@ -32,7 +32,7 @@ fi
 
 set -e
 
-VERSION=2af20197b8060de8eb682db595d7714a0ef34df7
+VERSION=5b17f53b4c76b91e2e13e5421012b2a75af59b90
 
 # STEP (1): install e9patch if necessary:
 if [ "`readlink e9patch`" != "e9patch-$VERSION/e9patch" ]
@@ -98,11 +98,11 @@ make rrCovPlugin.so
 echo -e "${GREEN}$0${OFF}: done!"
 echo
 
-echo -e "${YELLOW}  ____  ____  _____              "
-echo -e " |  _ \|  _ \|  ___|   _ ________"
-echo -e " | |_) | |_) | |_ | | | |_  /_  /"
-echo -e " |  _ <|  _ <|  _|| |_| |/ / / / "
-echo -e " |_| \_\_| \_\_|   \__,_/___/___|${OFF}"
+echo -e "${YELLOW} _____            _____              "
+echo -e "| ____|_ ____   _|  ___|   _ ________"
+echo -e "|  _| | '_ \ \ / / |_ | | | |_  /_  /"
+echo -e "| |___| | | \ V /|  _|| |_| |/ / / / "
+echo -e "|_____|_| |_|\_/ |_|   \__,_/___/___|${OFF}"
 
 echo
 echo "To use, run the following command:"
