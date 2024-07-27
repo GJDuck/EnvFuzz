@@ -23,19 +23,18 @@
 
 struct MSG
 {
-    int port;               // Message port
-    int error;              // Message error code (if applicable)
-    bool outbound;          // Message direction
     MSG *next;              // Next message
     MSG *prev;              // Prev message
-    size_t id;              // Message ID
+    uint16_t port;          // Message port
+    int8_t error;           // Message error code (if applicable)
+    bool outbound;          // Message direction
+    uint32_t id;            // Message ID
     union
     {
-        size_t len;         // Payload length
-        ssize_t slen;       // Payload length (signed)
+        uint32_t len;       // Payload length
+        int32_t slen;       // Payload length (signed)
     };
-    uint8_t *payload;       // Payload (pointer to data[])
-    uint8_t data[];         // Message data
+    uint8_t payload[];      // Payload (pointer to data[])
 };
 
 #include "fuzz_mutate.cpp"

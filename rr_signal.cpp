@@ -212,17 +212,17 @@ static void signal_replay_handler(int sig, siginfo_t *info, void *ctx)
             break;
     }
 
-    MSG *M = queue_peek(option_Q, SCHED_PORT);
-    if (M == NULL)
+    SCHED *R = option_SCHED;
+    if (R == NULL)
         error("unexpected end-of-schedule");
-    const SYSCALL *exp = (SYSCALL *)M->payload;
+    const SYSCALL *exp = (SYSCALL *)R->data;
     if (exp->id != fiber_self()->id || exp->no != SYS_signal ||
             sig != exp->arg0.sig)
     {
         warning("ignoring unexpected signal %s", signal_name(sig));
         return;
     }
-    (void)queue_pop(option_Q, SCHED_PORT);
+    option_SCHED = option_SCHED->next;
 
     if (option_log >= 3)
     {

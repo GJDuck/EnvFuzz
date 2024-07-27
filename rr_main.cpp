@@ -29,6 +29,7 @@ static bool option_record = false;
 #define RECORD  option_record                   // Are we recording?
 #define REPLAY  (!option_record)                // Are we replaying?
 
+struct SCHED;
 struct QUEUE;
 struct RNG;
 struct PATCH;
@@ -50,8 +51,9 @@ static const char *option_patchname = NULL;     // Patch filename.
 static const char *option_outname   = NULL;     // Output dirname.
 static const char *option_install   = NULL;     // Install dir.
 
-static QUEUE *option_Q              = NULL;     // Local message queue
-static RNG *option_RNG              = NULL;     // Random Number Generator
+static SCHED *option_SCHED          = NULL;     // Recording to replay.
+static QUEUE *option_Q              = NULL;     // Local message queue.
+static RNG *option_RNG              = NULL;     // Random Number Generator.
 static PATCH *option_P              = NULL;     // Patch to apply.
 
 #include "rr_misc.cpp"

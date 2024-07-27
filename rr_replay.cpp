@@ -466,14 +466,14 @@ static int replay_hook(STATE *state)
     else
         fiber_self()->futex = NULL;
 
-    MSG *M       = NULL;
+    SCHED *R = NULL;
     SYSCALL *exp = NULL;
     while (!fuzzer_emulate)
     {
-        M = queue_peek(option_Q, SCHED_PORT);
-        if (M == NULL)
+        R = option_SCHED;
+        if (R == NULL)
             error("unexpected end-of-schedule");
-        exp = (SYSCALL *)M->payload;
+        exp = (SYSCALL *)R->data;
         if (exp->id == fiber_self()->id)
         {
             if (exp->no == SYS_signal)
@@ -485,7 +485,8 @@ static int replay_hook(STATE *state)
                 continue;
             }
 
-            (void)queue_pop(option_Q, SCHED_PORT);
+            option_SCHED = option_SCHED->next;
+
             // Special handling:
             switch (exp->no)
             {
@@ -514,7 +515,7 @@ static int replay_hook(STATE *state)
     call->id = fiber_self()->id;
 
     const AUX *aux = exp->aux;
-    aux_validate(aux, M->len - sizeof(SYSCALL));
+    aux_validate(aux, R->len - sizeof(SYSCALL));
     if (!validate(exp, call))
         return emulate_hook(state);
 
@@ -788,10 +789,10 @@ static int replay_hook(STATE *state)
             case SYS_exit:
                 print_hook(stderr, call);
                 fiber_exit();
-                M = queue_peek(option_Q, SCHED_PORT);
-                if (M == NULL)
+                R = option_SCHED;
+                if (R == NULL)
                     error("unexpected end-of-schedule");
-                exp = (SYSCALL *)M->payload;
+                exp = (SYSCALL *)R->data;
                 FIBER_SWITCH(exp->id);
                 abort();        // Not reached
             case SYS_clock_gettime:
@@ -823,14 +824,11 @@ replay_exit:
  */
 static void replay_init(void)
 {
-    MSG *H = queue_peek(option_Q, SCHED_PORT);
-    if (H == NULL)
-        return;
-    for (MSG *M = H; ; M = M->next)
+    for (SCHED *R = option_SCHED; R != NULL; R = R->next)
     {
-        const SYSCALL *call = (SYSCALL *)M->payload;
+        const SYSCALL *call = (SYSCALL *)R->data;
         const AUX *aux = call->aux;
-        aux_validate(aux, M->len - sizeof(SYSCALL));
+        aux_validate(aux, R->len - sizeof(SYSCALL));
         const char *name;
         int port;
         if ((name = aux_str(aux, MR_, ANAM)) != nullptr &&
@@ -840,8 +838,6 @@ static void replay_init(void)
                 (port = aux_int(aux, M_R, APRT)) > 0)
             name_set(port, name, /*replace=*/true);
         emulate_set_syscall(call);
-        if (M->next == H)
-            break;
     }
 }
 

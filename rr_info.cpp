@@ -93,6 +93,13 @@ struct SYSCALL                  // Syscall instance
     AUX aux[];                  // Aux data
 } PACKED;
 
+struct SCHED                    // Recording
+{
+    SCHED *next;                // Next syscall
+    uint32_t len;               // Length of data[]
+    uint8_t data[];             // Current SYSCALL struct
+} PACKED;
+
 struct INFO                     // Syscall INFO
 {
     char name[24];              // Name

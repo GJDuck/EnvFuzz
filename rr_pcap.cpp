@@ -347,11 +347,14 @@ static void pcap_write(FILE *pcap, const uint8_t *buf, ssize_t len, int fd,
 /*
  * Read a message from a PCAP file.
  */
-static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
-    size_t *msg_id)
+static MSG *pcap_read(FILE *pcap, const char *filename, uint32_t *pkt_id,
+    uint32_t *msg_id)
 {
-    MSG *msgs = NULL;
-    while (true)
+    *msg_id  = *msg_id + 1;
+    MSG *msg = NULL;
+    uint32_t space = 0, extra = UINT16_MAX+1;
+    bool push = false;
+    while (!push)
     {
         struct packet_s pkt;
         if (fread(&pkt, sizeof(pkt), 1, pcap) != 1)
@@ -359,7 +362,7 @@ static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
             if (ferror(pcap))
                 error("failed to read message header from \"%s\": %s",
                     filename, strerror(errno));
-            if (msgs == NULL)
+            if (msg == NULL)
                 return NULL;
             error("failed to read message header from \"%s\"; "
                 "unexpected eof-of-file", filename);
@@ -367,33 +370,23 @@ static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
         if (pkt.len != pkt.clen)
             error("failed to read truncated message data from \"%s\"",
                 filename);
-        *pkt_id = *pkt_id + 1;
-        size_t msgsiz = sizeof(MSG) + pkt.len;
-        MSG *msg = (MSG *)xmalloc(msgsiz);
-        memset(msg, 0, msgsiz);
-        size_t count = 0;
-        while (count < (size_t)pkt.len)
-        {
-            errno = 0;
-            size_t r = fread(msg->data+count, sizeof(uint8_t),
-                (size_t)pkt.len-count, pcap);
-            if (r <= 0)
-                error("failed to read packet data from \"%s\"%s%s",
-                    filename, (errno != 0? ": ": ""),
-                    (errno != 0? strerror(errno): ""));
-            count += r;
-        }
-
-        // Parse the packet:
         if (pkt.len < sizeof(struct ethhdr) + sizeof(struct ip6_hdr) +
                 sizeof(struct tcphdr))
-            error("failed to parse packet (#%zu) from \"%s\"; packet "
+            error("failed to parse packet (#%u) from \"%s\"; packet "
                 "length %u is too small", *pkt_id, filename, pkt.len);
+        *pkt_id = *pkt_id + 1;
+
+        // Parse the packet:
+        uint8_t hdrs[sizeof(struct ethhdr) + sizeof(struct ip6_hdr) +
+            sizeof(struct tcphdr)];
+        if (fread(hdrs, sizeof(hdrs), 1, pcap) != 1)
+            error("failed to read packet header from \"%s\": %s",
+                filename, strerror(errno));
         const char *src = "SSSSSSSSSSSSSSSS", *dst = "DDDDDDDDDDDDDDDD";
-        const struct ethhdr *ether = (struct ethhdr *)msg->data;
+        const struct ethhdr *ether = (struct ethhdr *)hdrs;
         const struct ip6_hdr *ip6  = (struct ip6_hdr *)(ether + 1);
         if (ntohs(ether->h_proto) != ETH_P_IPV6)
-            error("failed to parse packet (#%zu) from \"%s\"; expected "
+            error("failed to parse packet (#%u) from \"%s\"; expected "
                 "IPv6 ethernet type (0x%.4X), found (%.4X)", *pkt_id,
                 filename, ETH_P_IPV6, ntohs(ether->h_proto));
         bool outbound = false;
@@ -404,7 +397,7 @@ static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
                  memcmp(ether->h_dest, src, ETH_ALEN) == 0)
             outbound = false;
         else
-            error("failed to parse packet (#%zu) from \"%s\"; expected "
+            error("failed to parse packet (#%u) from \"%s\"; expected "
                 "source/destination ethernet address "
                 "(%.1X:%.1X:%.1X:%.1X:%.1X:%.1X or "
                 "%.1X:%.1X:%.1X:%.1X:%.1X:%.1X), found "
@@ -423,10 +416,10 @@ static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
                     sizeof(ip6->ip6_src)) != 0 ||
                 memcmp(&ip6->ip6_dst, (outbound? dst: src),
                     sizeof(ip6->ip6_dst)) != 0)
-            error("failed to parse packet (#%zu) from \"%s\": invalid IPv6 "
+            error("failed to parse packet (#%u) from \"%s\": invalid IPv6 "
                 "header", *pkt_id, filename);
         if (ip6->ip6_nxt != IPPROTO_TCP)
-            error("failed to parse packet (#%zu) from \"%s\": missing TCP "
+            error("failed to parse packet (#%u) from \"%s\": missing TCP "
                 "header", *pkt_id, filename);
         const struct tcphdr *tcp;
         uint32_t len = ntohs(ip6->ip6_plen);
@@ -434,7 +427,7 @@ static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
         uint32_t exp_len = pkt.len - sizeof(struct ethhdr) -
             sizeof(struct ip6_hdr) - sizeof(uint32_t);
         if (len < sizeof(struct tcphdr) || len != exp_len)
-            error("failed to parse packet (#%zu) from \"%s\": invalid "
+            error("failed to parse packet (#%u) from \"%s\": invalid "
                 "packet length; expected %u, got %u", *pkt_id, filename,
                 exp_len, len);
         uint16_t dst16 = (outbound? tcp->th_dport: tcp->th_sport);
@@ -443,82 +436,67 @@ static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
                 sizeof(tcp->th_sport)) != 0 ||
             memcmp(&tcp->th_dport, (outbound? dst8: src),
                 sizeof(tcp->th_dport)) != 0)
-            error("failed to parse packet (#%zu) from \"%s\": invalid TCP "
+            error("failed to parse packet (#%u) from \"%s\": invalid TCP "
                 "header", *pkt_id, filename);
-        bool push = ((tcp->th_flags & TH_PUSH) != 0);
         int port = (int)ntohs(dst16);
+        if (msg != NULL && (msg->outbound != outbound || msg->port != port))
+            error("failed to parse packet (#%u) from \"%s\": invalid packet "
+                "sequence", *pkt_id, filename);
         len -= sizeof(struct tcphdr);
+        uint32_t fcs = 0;
+        uint8_t *data = NULL;
+        if (len > 0)
+        {
+            push = ((tcp->th_flags & TH_PUSH) != 0);
+            if (msg == NULL || len > space)
+            {
+                space  = (push? 0: extra);
+                extra += space;
+                uint32_t mlen = (msg == NULL? 0: msg->len);
+                msg = (MSG *)xrealloc(msg,
+                    sizeof(MSG) + mlen + len + space);
+                msg->prev     = msg->next = NULL;
+                msg->id       = *msg_id;
+                msg->port     = port;
+                msg->outbound = outbound;
+                msg->len      = mlen;
+            }
+            else
+                space -= len;
+            data = msg->payload + msg->len;
+            if (fread(data, len, 1, pcap) != 1)
+                error("failed to read packet data from \"%s\": %s",
+                    filename, strerror(errno));
+            msg->len += len;
+            fcs = *(uint32_t *)(msg->payload + msg->len);
+        }
+        if (fread(&fcs, sizeof(fcs), 1, pcap) != 1)
+            error("failed to read packet data from \"%s\": %s",
+                filename, strerror(errno));
         if (option_validate)
         {
             struct tcphdr tcp2;
             memcpy(&tcp2, tcp, sizeof(tcp2));
-            const uint8_t *payload =
-                (uint8_t *)tcp + (tcp->th_off * sizeof(uint32_t));
             tcp2.th_sum = 0x0;
-            tcp2.th_sum = tcp_checksum(ip6, &tcp2, payload, len);
+            tcp2.th_sum = tcp_checksum(ip6, &tcp2, data, len);
             if (tcp2.th_sum != tcp->th_sum)
-                error("failed to parse packet (#%zu) from \"%s\": invalid TCP "
+                error("failed to parse packet (#%u) from \"%s\": invalid TCP "
                     "checksum", *pkt_id, filename);
-            uint32_t fcs = 0xffffffff;
-            fcs = fcs_checksum(fcs, msg->data, pkt.len - sizeof(uint32_t));
-            fcs = ~fcs;
-            const uint32_t *fcsptr =
-                (uint32_t *)(msg->data + pkt.len - sizeof(uint32_t));
-            if (*fcsptr != fcs)
-                error("failed to parse packet (#%zu) from \"%s\": invalid FCS "
+            uint32_t fcs2 = 0xffffffff;
+            fcs2 = fcs_checksum(fcs2, hdrs, sizeof(hdrs));
+            fcs2 = fcs_checksum(fcs2, data, len);
+            fcs2 = ~fcs2;
+            if (fcs2 != fcs)
+                error("failed to parse packet (#%u) from \"%s\": invalid FCS "
                     "checksum", *pkt_id, filename);
         }
-        if (len == 0 && (tcp->th_flags & TH_URG) == 0)
-        {
-            // This is a TCP control message ---> ignore
-            if (msgs != NULL)
-                error("failed to parse packet (#%zu) from \"%s\": invalid "
-                    "packet sequence", *pkt_id, filename);
-            free(msg);
-            continue;
-        }
-        msg->id        = SIZE_MAX;
-        msg->outbound  = outbound;
-        msg->port      = port;
-        msg->payload   = (uint8_t *)(tcp + 1);
-        msg->len       = len;
-        msg->next      = msgs;
-        if (msgs != NULL && (msgs->outbound != outbound || msgs->port != port))
-            error("failed to parse packet (#%zu) from \"%s\": invalid packet "
-                "sequence", *pkt_id, filename);
-        msgs = msg;
-        if (push)
-            break;
+        if (len == 0 && (tcp->th_flags & TH_URG) == 0 && msg != NULL)
+            error("failed to parse packet (#%u) from \"%s\": invalid "
+                "packet sequence", *pkt_id, filename);
     }
-
-    *msg_id  = *msg_id + 1;
-    msgs->id = *msg_id;
-    if (msgs->next == NULL)
-        return msgs;
-
-    // Stitch packets together:
-    size_t len = 0;
-    for (const MSG *m = msgs; m != NULL; m = m->next)
-        len += m->len;
-    size_t msgsiz = sizeof(MSG) + len;
-    MSG *msg = (MSG *)xmalloc(msgsiz);
-    memset(msg, 0x0, msgsiz);
-    msg->id       = *msg_id;
-    msg->outbound = msgs->outbound;
-    msg->port     = msgs->port;
-    msg->payload  = msg->data;
-    msg->len      = len;
-    ssize_t i = len;
-    for (MSG *m = msgs; m != NULL; )
-    {
-        i -= m->len;
-        memcpy(msg->payload + i, m->payload, m->len);
-        MSG *prev = m;
-        m = m->next;
-        free(prev);
-    }
-    if (i != 0)
-        error("failed to reconstruct multi-packet message");
+    assert(msg != NULL);
+    if (space > 0)
+        msg = (MSG *)xrealloc(msg, sizeof(MSG) + msg->len);
     return msg;
 }
 
@@ -527,9 +505,32 @@ static MSG *pcap_read(FILE *pcap, const char *filename, size_t *pkt_id,
  */
 static size_t pcap_parse(FILE *pcap, const char *filename, QUEUE *Q)
 {
-    size_t pkt_id = 0, msg_id = 0;
+    uint32_t pkt_id = 0, msg_id = 0, call_id = 0;
     while (MSG *M = pcap_read(pcap, filename, &pkt_id, &msg_id))
-        queue_push_back(Q, M);
+    {
+        if (M->port == SCHED_PORT)
+        {
+            call_id++;
+            if (M->len < sizeof(SYSCALL))
+                error("failed to parse syscall (#%u) from \"%s\"; invalid "
+                    "record size", call_id, filename);
+            SCHED *R = (SCHED *)xmalloc(sizeof(SCHED) + M->len);
+            memcpy(R->data, M->payload, M->len);
+            R->len  = M->len;
+            R->next = option_SCHED;
+            option_SCHED = R;
+            xfree(M);
+        }
+        else
+            queue_push_back(Q, M);
+    }
+    SCHED *prev = NULL, *next = NULL;
+    for (SCHED *curr = option_SCHED; curr != NULL; curr = next)
+    {
+        next = curr->next;
+        curr->next = prev;
+        option_SCHED = prev = curr;
+    }
     return msg_id+1;
 }
 

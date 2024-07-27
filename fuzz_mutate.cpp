@@ -103,7 +103,6 @@ static MSG *clone(MSG *M, size_t padding = 0)
     size_t size = sizeof(MSG) + M->len + padding;
     MSG *N = (MSG *)pmalloc(size);
     memcpy(N, M, sizeof(MSG));
-    N->payload = N->data;
     N->next = N->prev = N;
     memcpy(N->payload, M->payload, M->len);
     return N;
@@ -340,7 +339,6 @@ static MSG *mutate(RNG &R, MSG *M, size_t depth, size_t stage,
     {
         size = sizeof(MSG) + P->len;
         P = (MSG *)prealloc((void *)P, size);
-        P->payload = P->data;
     }
 
     return P;
