@@ -45,7 +45,7 @@ struct BRANCH                   // Per-branch state
         TLSH tlsh;              // LSH of input
     }
     in;
-    BKTREE *out;                // Best outputs
+    PARTITION *out;             // Output partitioning
     CORPUS corpus;              // Seed corpus
 };
 
@@ -441,7 +441,7 @@ boring_patch:
 
     // Save interesting patch to the corpus:
     P->cov = cov;
-    if (!cov && !bk_insert(B->out, K, P))
+    if (!cov && !insert(B->out, K, P))
         goto boring_patch;
     if (cov)
         FUZZ->ncov++;
@@ -643,7 +643,7 @@ static MSG *fuzzer_mutate(const ENTRY *E, MSG *M)
     BRANCH *B = fuzzer_get_branch(M);
     PATCH *P  = &B->corpus.head;
     uint8_t size = 1 + NLOG2(1, 1000 * FUZZ->stage);
-    B->out  = bk_resize(B->out, size);
+    B->out  = resize(B->out, size);
     do
     {
         P->load();
@@ -653,29 +653,17 @@ static MSG *fuzzer_mutate(const ENTRY *E, MSG *M)
             if (FUZZ->stop)
                 exit(EXIT_FAILURE);
 
-            MSG *M1 = fuzzer_fork(M, P);
-            if (M1 != NULL)
-                return M1;      // We are a leaf & M1 is the mutant message
+            MSG *N = fuzzer_fork(M, P);
+            if (N != NULL)
+                return N;       // We are a leaf & N is the mutant message
         }
         P->unload();
         P = P->next;
     }
-    while (P != &B->corpus.head);
+    while (P != NULL);
 
     // Step (3): Clean-up any discarded patch:
-    P = &B->corpus.head;
-    PATCH *Q = NULL;
-    do
-    {
-        Q = P->next;
-        if (P->discard)
-        {
-            P->reset();
-            pfree((void *)P);
-        }
-        P = Q;
-    }
-    while (P != &B->corpus.head);
+    B->corpus.gc();
 
     return M;
 }

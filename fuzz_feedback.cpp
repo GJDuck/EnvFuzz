@@ -4219,23 +4219,23 @@ static void tlsh_init(TLSH *tlsh)
 /****************************************************************************/
 
 typedef HASH KEY;
-struct BKNODE
+struct ELEMENT
 {
     KEY key;
     PATCH *patch;
 };
-struct BKTREE
+struct PARTITION
 {
     uint8_t threshold;
     uint8_t len;
     uint8_t size;
-    BKNODE entry[];
+    ELEMENT entry[];
 };
 
 /*
  * Hamming distance.
  */
-static size_t bk_distance(KEY K, KEY J)
+static size_t distance(KEY K, KEY J)
 {
     K ^= J;
     size_t d1, d2;
@@ -4250,14 +4250,14 @@ static size_t bk_distance(KEY K, KEY J)
 }
 
 /*
- * Create a new BKTREE.
+ * Create or resize a PARTIITION.
  */
-static BKTREE *bk_resize(BKTREE *root, uint8_t size)
+static PARTITION *resize(PARTITION *root, uint8_t size)
 {
-    size_t memsz = sizeof(BKTREE) + size * sizeof(BKNODE);
+    size_t memsz = sizeof(PARTITION) + size * sizeof(ELEMENT);
     if (root == NULL)
     {
-        root = (BKTREE *)pmalloc(memsz);
+        root = (PARTITION *)pmalloc(memsz);
         root->threshold = 1;
         root->len       = 0;
     }
@@ -4265,21 +4265,21 @@ static BKTREE *bk_resize(BKTREE *root, uint8_t size)
     {
         if (size <= root->size)
             return root;
-        root = (BKTREE *)prealloc((void *)root, memsz);
+        root = (PARTITION *)prealloc((void *)root, memsz);
     }
     root->size = size;
     return root;
 }
 
 /*
- * Insert a new patch.
+ * Insert a new patch into a PARTITION.
  */
-static bool bk_insert(BKTREE *root, KEY K, PATCH *P)
+static bool insert(PARTITION *root, KEY K, PATCH *P)
 {
     uint32_t min = UINT32_MAX;
     for (unsigned i = 0; i < root->len; i++)
     {
-        uint32_t d = bk_distance(root->entry[i].key, K);
+        uint32_t d = distance(root->entry[i].key, K);
         if (d <= root->threshold)
             return false;
         min = MIN(min, d);
@@ -4295,12 +4295,15 @@ static bool bk_insert(BKTREE *root, KEY K, PATCH *P)
         {
             bool found = false;
             for (unsigned k = 0; !found && k < j; k++)
-                found = (bk_distance(root->entry[i].key, root->entry[k].key)
+                found = (distance(root->entry[i].key, root->entry[k].key)
                             <= root->threshold);
             if (!found)
                 root->entry[j++] = root->entry[i];
             else
+            {
+                // Mark for garbage collection
                 root->entry[i].patch->discard = true;
+            }
         }
         root->len = j;
     }

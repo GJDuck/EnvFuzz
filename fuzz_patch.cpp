@@ -32,12 +32,11 @@ static MSG *messages_load(const char *filename, FILE *stream);
 struct PATCH                    // Patch representation
 {
     MSG *head;                  // Patch messages
-    PATCH *next;                // Next patch
-    PATCH *prev;                // Prev patch
+    PATCH *next;                // Next patch in corpus
     const char *filename;       // Patch filename
     bool discard;               // Discard this patch?
     bool disk;                  // Patch is saved to the disk?
-    bool cov;                   // Patch had new coverage?
+    bool cov;                   // Patch has new coverage?
 
     /*
      * Push a new message onto this patch.
@@ -48,26 +47,14 @@ struct PATCH                    // Patch representation
     }
 
     /*
-     * Merge two patches into the same set (corpus).
-     */
-    void merge(PATCH *P)
-    {
-        PATCH *prev_1 = prev, *prev_2 = P->prev;
-        prev_1->next = P;
-        P->prev      = prev_1;
-        prev_2->next = this;
-        prev         = prev_2;
-    }
-
-    /*
      * Initialize a patch (the "constructor").
      */
     void init(void)
     {
         head = NULL;
-        next = prev = this;
+        next = NULL;
         filename = NULL;
-        discard = disk = false;
+        discard = disk = cov = false;
     }
 
     /*
@@ -76,8 +63,6 @@ struct PATCH                    // Patch representation
     void reset(void)
     {
         head = messages_free(head);
-        next->prev  = prev;
-        prev->next  = next;
         if (filename != NULL)
         {
             if (!option_save)
@@ -145,11 +130,12 @@ struct PATCH                    // Patch representation
 
 struct CORPUS                   // Set of patches
 {
-    PATCH head;
+    PATCH head;                 // Head == empty patch
+    PATCH *tail;
 
     void init(void)
     {
-        head.init();
+        tail = &head;
     }
 
     /*
@@ -157,8 +143,6 @@ struct CORPUS                   // Set of patches
      */
     void insert(HASH K, PATCH *P)
     {
-        assert(P->head != NULL);
-        
         // Create the patch filename:
         PRINTER Q;
         Q.format("out/queue/m%u/", P->head->id);
@@ -168,8 +152,32 @@ struct CORPUS                   // Set of patches
         Q.format("m%.5u_%.16lx%.16lx.patch", P->head->id,
             (uint64_t)(K >> 64), (uint64_t)K);
         (void)P->save(Q.str());
-        head.merge(P);
+        P->next    = NULL;
+        tail->next = P;
+        tail       = P;
         P->unload();
+    }
+
+    /*
+     * Garbage collect the corpus.
+     */
+    void gc(void)
+    {
+        PATCH *P = &head, *Q = head.next;
+        while (Q != NULL)
+        {
+            PATCH *N = Q->next;
+            if (Q->discard)
+            {
+                Q->reset();
+                pfree((void *)Q);
+                P->next = N;
+            }
+            else
+                P = Q;
+            Q = N;
+        }
+        tail = P;
     }
 };
 
