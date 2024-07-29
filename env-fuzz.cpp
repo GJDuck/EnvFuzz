@@ -730,6 +730,8 @@ static void usage(const char *progname)
         "OPTIONS:\n"
         "\t--blackbox\n"
         "\t\tUse \"blackbox\" mode (no feedback)\n"
+        "\t--count N\n"
+        "\t\tRun for at most N executions\n"
         "\t--cpu CPU\n"
         "\t\tUse CPU number\n"
         "\t--debug, -d\n"
@@ -768,6 +770,7 @@ static void usage(const char *progname)
 enum OPTION
 {
     OPTION_BLACKBOX,
+    OPTION_COUNT,
     OPTION_CPU,
     OPTION_DEBUG,
     OPTION_DEPTH,
@@ -797,6 +800,7 @@ int main(int argc, char **argv, char **envp)
          option_record = false, option_replay = false, option_reset = false,
          option_blackbox = false, option_save = false,
          option_instrument = false;
+    size_t option_count = SIZE_MAX;
     int8_t option_log = 1;
     uint16_t option_depth = 50;
     int option_timeout = 50, option_cpu = -1, option_emulate = -1;
@@ -804,6 +808,7 @@ int main(int argc, char **argv, char **envp)
     static const struct option long_options[] =
     {
         {"blackbox", no_argument,       nullptr, OPTION_BLACKBOX},
+        {"count",    required_argument, nullptr, OPTION_COUNT},
         {"cpu",      required_argument, nullptr, OPTION_CPU},
         {"debug",    no_argument,       nullptr, OPTION_DEBUG},
         {"depth",    required_argument, nullptr, OPTION_DEPTH},
@@ -831,6 +836,10 @@ int main(int argc, char **argv, char **envp)
         {
             case OPTION_BLACKBOX:
                 option_blackbox = true; break;
+            case OPTION_COUNT:
+                option_count = (size_t)parseInt(long_options[idx].name, optarg,
+                    1, INT64_MAX);
+                break;
             case OPTION_CPU:
                 option_cpu = (int)parseInt(long_options[idx].name, optarg,
                     0, UINT16_MAX);
@@ -1018,6 +1027,7 @@ int main(int argc, char **argv, char **envp)
         config->emulate  = option_emulate;
         config->depth    = option_depth;
         config->cpu      = option_cpu;
+        config->count    = option_count;
         config->timeout  = option_timeout;
         config->seed     = option_seed;
         size_t i = 0;

@@ -45,21 +45,14 @@ struct BRANCH                   // Per-branch state
         TLSH tlsh;              // LSH of input
     }
     in;
-
-    struct
-    {
-        BKTREE best;            // Best outputs
-        size_t mindist;         // Min distance b/n outputs
-        size_t maxsz;           // Max size of best
-    }
-    out;
-
+    BKTREE *out;                // Best outputs
     CORPUS corpus;              // Seed corpus
 };
 
 struct FUZZER                   // The fuzzer state
 {
     bool stop;                  // Stop fuzzing?
+    ssize_t count;              // Max executions
 
     uint64_t time;              // Start time
     size_t execs;               // # executions
@@ -160,6 +153,8 @@ static void fuzzer_init(size_t nmsg, int timeout)
     memset(FUZZ, 0x0, size);
 
     mutex_init(&FUZZ->lock);
+    FUZZ->count    =
+        (option_count > INT64_MAX? INT64_MAX: (ssize_t)option_count);
     FUZZ->stage    = 1;
     FUZZ->timeout  = timeout;
     FUZZ->leaf     = INT_MIN;
@@ -348,8 +343,6 @@ static BRANCH *fuzzer_get_branch(const MSG *M)
         FUZZER_UNLOCK();
         BRANCH *B = FUZZ->branches[M->id];
         memset(B, 0x0, sizeof(*B));
-        B->out.mindist = 1;
-        B->out.maxsz   = 0;
         B->corpus.init();
 
         tlsh_init(&B->in.tlsh);
@@ -446,35 +439,15 @@ boring_patch:
         return false;
     }
 
-    bool out = !bk_find(&B->out.best, K, B->out.mindist);
-    bool good = out || cov;
-    if (!good)
-        goto boring_patch;
-
     // Save interesting patch to the corpus:
     P->cov = cov;
-    if (!B->corpus.insert(K, P))
+    if (!cov && !bk_insert(B->out, K, P))
         goto boring_patch;
-
-    if (out)
-    {
-        bk_insert(&B->out.best, K, P);
-        if (B->out.best.size > B->out.maxsz)
-        {
-            do
-            {
-                B->out.mindist++;
-                bk_rebuild(&B->out.best, B->out.mindist);
-            }
-            while (B->out.best.size > B->out.maxsz);
-            out = !bk_find(&B->out.best, K, B->out.mindist);
-        }
-    }
-
     if (cov)
         FUZZ->ncov++;
+    B->corpus.insert(K, P);
 
-    return (out || cov);
+    return true;
 }
 
 /*
@@ -585,12 +558,23 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
     size_t R = 1000000000;
     size_t xps = (R * FUZZ->execs) / t;
     xps *= 1000000;
-    fprintf(stderr, " #%.04zu: exec/s=%zu.%.3zu %souts=%zu/%zu%s "
-        "%spath=%.2zu%s %scrash=%zu%s %sabort=%zu%s %shang=%zu%s "
+    size_t mem = (MA_UNIT *
+      (malloc_pool.root == MA_NIL? 0: MA_UB((&malloc_pool), malloc_pool.root)))
+        / MA_PAGE_SIZE;
+    size_t pmem = (MA_UNIT *
+        (pool->root == MA_NIL? 0: MA_UB(pool, pool->root))) / MA_PAGE_SIZE;
+    fprintf(stderr, " #%.04zu: "
+        "exec/s=%zu.%.3zu "
+        "mem=%zu,%zu "
+        "dist=%u "
+        "%souts=%zu/%zu%s "
+        "%spath=%.2zu%s "
+        "%scrash=%zu%s "
+        "%sabort=%zu%s %shang=%zu%s "
         "%sout=%.16llx%.16llx%s\n",
-        M->id, xps / R, (xps % R) / 1000000,
-        COLOR(B->out.best.size >= B->out.maxsz, WHITE), B->out.best.size,
-            B->out.maxsz, OFF,
+        M->id, xps / R, (xps % R) / 1000000, mem, pmem, B->out->threshold,
+        COLOR(B->out->len >= B->out->size, WHITE), B->out->len,
+            B->out->size, OFF,
         COLOR(FUZZ->ncov, WHITE), FUZZ->ncov, OFF,
         COLOR(FUZZ->crashes, RED), FUZZ->crashes, OFF,
         COLOR(FUZZ->aborts, YELLOW), FUZZ->aborts, OFF,
@@ -658,12 +642,14 @@ static MSG *fuzzer_mutate(const ENTRY *E, MSG *M)
     // Step (2): Inner fuzzing loop:
     BRANCH *B = fuzzer_get_branch(M);
     PATCH *P  = &B->corpus.head;
-    B->out.maxsz = 1 + NLOG2(1, 1000 * FUZZ->stage);
+    uint8_t size = 1 + NLOG2(1, 1000 * FUZZ->stage);
+    B->out  = bk_resize(B->out, size);
     do
     {
         P->load();
         for (size_t i = 0; !P->discard && i < FUZZ->stage; i++)
         {
+            FUZZ->stop = (FUZZ->count-- <= 0? true: FUZZ->stop);
             if (FUZZ->stop)
                 exit(EXIT_FAILURE);
 

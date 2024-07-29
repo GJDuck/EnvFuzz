@@ -4218,27 +4218,18 @@ static void tlsh_init(TLSH *tlsh)
 /* END TLSH                                                                 */
 /****************************************************************************/
 
-/*
- * B-K tree implementation.
- */
 typedef HASH KEY;
-struct BKNODE;
-struct BKCHILD
-{
-    size_t d;
-    BKNODE *child;
-    BKCHILD *next;
-};
 struct BKNODE
 {
     KEY key;
     PATCH *patch;
-    BKCHILD *child;
 };
 struct BKTREE
 {
-    BKNODE *root;
-    size_t size;
+    uint8_t threshold;
+    uint8_t len;
+    uint8_t size;
+    BKNODE entry[];
 };
 
 /*
@@ -4259,123 +4250,66 @@ static size_t bk_distance(KEY K, KEY J)
 }
 
 /*
- * Insert a node into a B-K tree.
+ * Create a new BKTREE.
  */
-static BKNODE *bk_insert(BKNODE **root, KEY K, PATCH *P)
+static BKTREE *bk_resize(BKTREE *root, uint8_t size)
 {
-    if (*root == NULL)
+    size_t memsz = sizeof(BKTREE) + size * sizeof(BKNODE);
+    if (root == NULL)
     {
-        BKNODE *node = (BKNODE *)pmalloc(sizeof(BKNODE));
-        node->key = K;
-        node->child = NULL;
-        node->patch = P;
-        *root = node;
-        return node;
+        root = (BKTREE *)pmalloc(memsz);
+        root->threshold = 1;
+        root->len       = 0;
     }
-    BKNODE *node = *root;
-    size_t d = bk_distance(K, node->key);
-    if (d == 0)
-        return NULL;
-    BKCHILD *curr = NULL, *prev = NULL;
-    for (curr = node->child; curr != NULL && d >= curr->d; curr = curr->next)
-    {
-        if (d == curr->d)
-            return bk_insert(&curr->child, K, P);
-        prev = curr;
-    }
-    BKCHILD *child = (BKCHILD *)pmalloc(sizeof(BKCHILD));
-    child->d     = d;
-    child->child = NULL;
-    child->next  = curr;
-    if (prev == NULL)
-        node->child = child;
     else
-        prev->next = child;
-    return bk_insert(&child->child, K, P);
-}
-static void bk_insert(BKTREE *tree, KEY K, PATCH *P)
-{
-    if (K == 0x0)
-        return;
-    BKNODE *node = bk_insert(&tree->root, K, P);
-    tree->size += (node != NULL? 1: 0);
+    {
+        if (size <= root->size)
+            return root;
+        root = (BKTREE *)prealloc((void *)root, memsz);
+    }
+    root->size = size;
+    return root;
 }
 
 /*
- * Search a B-K tree.
+ * Insert a new patch.
  */
-static KEY bk_find(const BKNODE *node, KEY K, size_t max, size_t &n)
+static bool bk_insert(BKTREE *root, KEY K, PATCH *P)
 {
-    if (n == 0 || node == NULL)
-        return 0x0;
-    n--;
-
-    size_t d = bk_distance(K, node->key);
-    if (d <= max)
-        return node->key;
-
-    size_t lb = d - max;
-    size_t ub = d + max;
-    for (const BKCHILD *curr = node->child; n > 0 && curr != NULL;
-        curr = curr->next)
+    uint32_t min = UINT32_MAX;
+    for (unsigned i = 0; i < root->len; i++)
     {
-        if (curr->d < lb)
-            continue;
-        if (curr->d > ub)
-            break;
-        KEY R = bk_find(curr->child, K, max, n);
-        if (R != 0x0)
-            return R;
+        uint32_t d = bk_distance(root->entry[i].key, K);
+        if (d <= root->threshold)
+            return false;
+        min = MIN(min, d);
     }
-    return 0x0;
-}
-static bool bk_find(const BKTREE *tree, KEY K, size_t max)
-{
-    if (K == 0x0)
+    // Resize if necessary:
+    while (root->len >= root->size)
+    {
+        if (root->threshold == UINT8_MAX)
+            return false;
+        root->threshold++;
+        unsigned j = 0;
+        for (unsigned i = 0; i < root->len; i++)
+        {
+            bool found = false;
+            for (unsigned k = 0; !found && k < j; k++)
+                found = (bk_distance(root->entry[i].key, root->entry[k].key)
+                            <= root->threshold);
+            if (!found)
+                root->entry[j++] = root->entry[i];
+            else
+                root->entry[i].patch->discard = true;
+        }
+        root->len = j;
+    }
+    if (min <= root->threshold)
         return false;
-    size_t n = tree->size / 16;
-    n = MAX(n, 32);
-    KEY R = bk_find(tree->root, K, max, n);
-    return (R != 0x0);
-}
-
-/*
- * Rebuild a B-K tree.
- */
-static size_t bk_rebuild(BKNODE *node, BKNODE **root, size_t min)
-{
-    if (node == NULL)
-        return 0;
-    size_t size = 0;
-    size_t n    = 1024;
-    KEY K = bk_find(*root, node->key, min, n);
-    bool keep = false;
-    if (K == 0x0)
-        keep = (bk_insert(root, node->key, node->patch) != NULL);
-    if (keep)
-        size++;
-    else
-    {
-        // Patch similar to other outputs & not new coverage -> discard
-        node->patch->discard = !node->patch->cov;
-    }
-
-    BKCHILD *curr = node->child;
-    pool_free(pool, (void *)node);
-    while (curr != NULL)
-    {
-        BKCHILD *prev = curr;
-        curr = curr->next;
-        size += bk_rebuild(prev->child, root, min);
-        pool_free(pool, (void *)prev);
-    }
-    return size;
-}
-static void bk_rebuild(BKTREE *tree, size_t min)
-{
-    BKNODE *root = tree->root;
-    tree->root = NULL;
-    tree->size = bk_rebuild(root, &tree->root, min);
+    root->entry[root->len].key   = K;
+    root->entry[root->len].patch = P;
+    root->len++;
+    return true;
 }
 
 /*
@@ -4426,8 +4360,6 @@ struct OUTPUT
     size_t i = 0;
     WRITE outs[NPORTS];
     uint32_t cov;
-
-    BKTREE good;
 
     void reset(void)
     {

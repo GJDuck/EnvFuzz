@@ -155,7 +155,7 @@ struct CORPUS                   // Set of patches
     /*
      * Insert a patch into the corpus.
      */
-    bool insert(HASH K, PATCH *P)
+    void insert(HASH K, PATCH *P)
     {
         assert(P->head != NULL);
         
@@ -167,10 +167,9 @@ struct CORPUS                   // Set of patches
                 strerror(errno));
         Q.format("m%.5u_%.16lx%.16lx.patch", P->head->id,
             (uint64_t)(K >> 64), (uint64_t)K);
-        if (!P->save(Q.str()))
-            return false;
+        (void)P->save(Q.str());
         head.merge(P);
-        return true;
+        P->unload();
     }
 };
 
