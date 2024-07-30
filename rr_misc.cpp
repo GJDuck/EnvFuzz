@@ -455,6 +455,14 @@ static char *memfd_name(int fd, const char *path, char *name, size_t size)
             strerror(errno));
     return name;
 }
+static char *unknown_name(int fd, char *name, size_t size)
+{
+    int r = snprintf(name, size-1, "unknown://%d", fd);
+    if (r <= 0 || r >= (ssize_t)size-1)
+        error("failed to generate name for (%d): %s", fd,
+            strerror(errno));
+    return name;
+}
 
 /*
  * Check if virtual address range is free.

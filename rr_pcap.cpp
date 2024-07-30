@@ -296,7 +296,7 @@ static void pcap_write_close(FILE *pcap, int fd)
 static void pcap_write(FILE *pcap, const struct iovec *iov, size_t iovcnt,
     size_t max, int fd, bool outbound)
 {
-    ENTRY *E = fd_entry(fd);
+    ENTRY *E = fd_get(fd);
     if (E == NULL)
         return;
     size_t len = 0;

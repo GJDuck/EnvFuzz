@@ -119,14 +119,7 @@ static void print_aux_syscall(PRINTER &P, const SYSCALL *call)
 static void queue_validate(const SYSCALL *exp, int i, uint8_t arg, int fd,
     const iovec *iov, size_t iovcnt)
 {
-    ENTRY *E = fd_entry(fd);
-    if (E == NULL)
-    {
-        warning("bad file descritor (fd=%d) for %s() arg #%d",
-            fd, syscall_name(exp->no), i);
-        return;
-    }
-
+    ENTRY *E = fd_get(fd);
     PRINTER P;
     if (option_log >= 1 && option_log <= 2 &&
             (fd == STDOUT_FILENO || fd == STDERR_FILENO))

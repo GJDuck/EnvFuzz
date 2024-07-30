@@ -292,7 +292,9 @@ static ENTRY *fd_get(int fd)
     ENTRY *E = fd_entry(fd);
     if (E != NULL)
         return E;
-    E = fd_open(fd, S_IFSOCK, SOCK_STREAM, 0x0, NULL);
+    char name[128];
+    E = fd_open(fd, S_IFSOCK, SOCK_STREAM, O_CREAT,
+        unknown_name(fd, name, sizeof(name)));
     assert(E != NULL);
     return E;
 }
