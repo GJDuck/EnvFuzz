@@ -348,6 +348,11 @@ static int record_hook(STATE *state)
             flags = (call->no == SYS_accept4? call->arg3.i32: 0x0);
             E = fd_open((int)call->result, S_IFSOCK, E->socktype, flags, NULL);
             goto handler;
+        case /*SYS_memfd_create=*/319:
+            E = fd_open((int)call->result, S_IFSOCK, SOCK_STREAM, O_CREAT,
+                memfd_name((int)call->result, call->arg0.path, name,
+                    sizeof(name)));
+            goto handler;
         case SYS_pipe: case SYS_pipe2:
             fds = call->arg0.fds;
             flags = (call->no == SYS_pipe2? call->arg1.i32: 0x0);
