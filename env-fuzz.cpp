@@ -1087,7 +1087,7 @@ int main(int argc, char **argv, char **envp)
             }
 
             // Construct and execute the command:
-            setEnv(option_replay, option_pcapname, envp);
+            setEnv(option_replay || option_fuzz, option_pcapname, envp);
             std::vector<const char *> args;
             args.push_back(interp.c_str());
             args.push_back("--library-path");
