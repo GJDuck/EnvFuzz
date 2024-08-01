@@ -306,30 +306,6 @@ static bool validate(const SYSCALL *exp, const SYSCALL *call)
 }
 
 /*
- * Set envp.
- * Note the actual setting is handled elsewhere; this just prints.
- */
-static void replay_setenvp(void)
-{
-    if (option_log < 3)
-        return;
-    SYSCALL call_0 = {0};
-    SYSCALL *call = &call_0;
-    PRINTER P;
-    for (char **p = environ; *p != NULL; p++)
-    {
-        if (p != environ)
-            P.put('\0');
-        P.put(*p);
-    }
-    call->no = SYS_setenvp;
-    call->id = 1;
-    call->arg0.buf  = (uint8_t *)P.str();
-    call->arg1.size = P.len()+1;
-    print_hook(stderr, call);
-}
-
-/*
  * Replay a mmap() syscall.
  */
 static intptr_t replay_mmap(const SYSCALL *exp, const SYSCALL *call)
@@ -423,8 +399,21 @@ mmap_error:
 /*
  * Set the pid.
  */
-static void replay_setpid(pid_t pid)
+static void replay_setcontext(const SYSCALL *exp)
 {
+    const AUX *aux = exp->aux;
+    const CONTEXT *ctx = (CONTEXT *)aux_data(aux, MI_____, ACTX);
+    if (ctx == NULL)
+        error("failed to get execution context");
+    if (option_log >= 3)
+    {
+        SYSCALL call_0;
+        SYSCALL *call = &call_0;
+        memcpy(call, exp, sizeof(SYSCALL));
+        call->arg0.ptr = (void *)ctx;
+        print_hook(stderr, call);
+    }
+    pid_t pid = ctx->pid;
     emulate_set_pid(pid);
     asm volatile ("mov %0,%%fs:0x2d4" : : "r"(pid));
 }
@@ -485,12 +474,8 @@ static int replay_hook(STATE *state)
             {
                 case SYS_start:
                     continue;
-                case SYS_setpid:
-                    replay_setpid(exp->arg0.pid);
-                    print_hook(stderr, exp);
-                    continue;
-                case SYS_setenvp:
-                    replay_setenvp();
+                case SYS_setcontext:
+                    replay_setcontext(exp);
                     continue;
             }
             break;

@@ -1240,6 +1240,26 @@ static void print_prctl_arg(PRINTER &P, int cmd, intptr_t arg)
         P.format("%ld", arg);
 }
 
+static void print_context(PRINTER &P, const CONTEXT *ctx)
+{
+    P.format("{cpu=%d,pid=%d,argv=[", ctx->cpu, ctx->pid);
+    const char *p = ctx->args;
+    bool r = false;
+    for (unsigned i = 0; i < ctx->argc; i++)
+    {
+        r = P.format("%s\"%s\"", (r? ",": ""), p);
+        p += strlen(p)+1;
+    }
+    P.put("],envp=[");
+    r = false;
+    for (unsigned i = 0; i < ctx->envl; i++)
+    {
+        r = P.format("%s\"%s\"", (r? ",": ""), p);
+        p += strlen(p)+1;
+    }
+    P.put("]}");
+}
+
 /*
  * Print the difference between IOVs.
  */
@@ -1416,6 +1436,8 @@ static void print_arg(PRINTER &P, const INFO *info, uint8_t arg,
             print_prctl(P, (int)val); break;
         case APRA:
             print_prctl_arg(P, (int)prev, val); break;
+        case ACTX:
+            print_context(P, (CONTEXT *)val); break;
         default:
             P.put("<unknown>"); break;
     }

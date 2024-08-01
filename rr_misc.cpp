@@ -48,8 +48,8 @@
 // Pseudo syscalls
 #define SYS_rdtsc       335         // rdtsc instruction
 #define SYS_start       336         // Thread start
-#define SYS_setpid      337         // Set program pid
-#define SYS_setenvp     338         // Set envp
+#define SYS_unused      337         // Unused
+#define SYS_setcontext  338         // Set context
 #define SYS_signal      339         // Signal
 #define SYS_enable      340         // Enable record&replay
 #define SYS_disable     341         // Disable record&replay

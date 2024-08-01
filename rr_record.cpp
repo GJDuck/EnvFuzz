@@ -83,44 +83,49 @@ static void record_start(int id)
 /*
  * Record program start.
  */
-static void record_init(char **envp)
+static void record_init(char **argv, char **envp)
 {
     SYSCALL call_0 = {0};
     SYSCALL *call = &call_0;
 
     // First message must be SYS_setenvp
     PRINTER P;
+    uint32_t argc = 0, envl = 0;
+    for (char **p = argv; *p != NULL; p++)
+    {
+        P.put(*p);
+        P.put('\0');
+        argc++;
+    }
     for (char **p = envp; *p != NULL; p++)
     {
-        if (p != envp)
-            P.put('\0');
         P.put(*p);
+        P.put('\0');
+        envl++;
     }
-    call->no = SYS_setenvp;
+    pid_t pid = getpid();
+    size_t size = sizeof(CONTEXT) + P.len();
+    CONTEXT *ctx = (CONTEXT *)xmalloc(size);
+    ctx->cpu  = option_cpu;
+    ctx->pid  = pid;
+    ctx->argc = argc;
+    ctx->envl = envl;
+    ctx->size = P.len();
+    memcpy(ctx->args, P.str(), P.len());
+
+    call->no = SYS_setcontext;
     call->id = 1;
     call->arg0.buf  = (uint8_t *)P.str();
-    call->arg1.size = P.len()+1;
+    call->arg1.size = P.len();
     {
         AUXVEC auxv(call);
-        auxv.push(P.str(), P.len()+1, MI_____, ABUF);
+        auxv.push(ctx, size, MI_____, ACTX);
         auxv.end();
         pcap_write(option_pcap, auxv.iov(), auxv.iovcnt(), SIZE_MAX,
             SCHED_FD, OUTBOUND);
     }
     print_hook(stderr, call);
-
-    memset(call, 0x0, sizeof(*call));
-    pid_t pid = getpid();
-    call->no       = SYS_setpid;
-    call->id       = 1;
-    call->arg0.pid = pid;
-    {
-        AUXVEC auxv(call);
-        auxv.end();
-        pcap_write(option_pcap, auxv.iov(), auxv.iovcnt(), SIZE_MAX,
-            SCHED_FD, OUTBOUND);
-    }
-    print_hook(stderr, call);
+    xfree((void *)ctx);
 
     asm volatile ("mov %0,%%fs:0x2d4" : : "r"(pid));
 }

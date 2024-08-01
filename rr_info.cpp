@@ -216,6 +216,7 @@ struct AUXVEC                   // Auxiliary data helper
 #define ASTK            62      // stack_t
 #define APRC            63      // prctl option
 #define APRA            64      // prctl arg
+// #define ACTX         250     // CONTEXT (see rrfuzz.h)
 #define ANAM            251     // Port name
 #define APTH            252     // Pathname
 #define ANYI            253     // Not-yet-implemented
@@ -597,8 +598,8 @@ static const INFO TABLE[] =
     // Pseudo syscalls:
     {"rdtsc",                   0, 0, PINF, {A___, A___, A___, A___, A___, A___}, RDEC, M______},
     {"start",                   0, 0, PINF, {A___, A___, A___, A___, A___, A___}, R__0, M______},
-    {"setpid",                  0, 0, PINF, {ADEC, A___, A___, A___, A___, A___}, R__0, M______},
-    {"setenvp",                 0, 0, PINF, {ABUF, ASIZ, A___, A___, A___, A___}, R__0, M______},
+    {"<unused>",                0, 0, PXXX, {A___, A___, A___, A___, A___, A___}, R__0, M______},
+    {"setcontext",              0, 0, PINF, {ACTX, ASIZ, A___, A___, A___, A___}, R__0, M______},
     {"signal",                  0, 0, PSIG, {ASIG, A_SI, A___, A___, A___, A___}, R__0, M_I____},
     {"enable",                  0, 0, PINF, {A___, A___, A___, A___, A___, A___}, R__0, M______},
     {"disable",                 0, 0, PINF, {A___, A___, A___, A___, A___, A___}, R__0, M______},
@@ -840,6 +841,7 @@ static const char *arg_name(uint8_t arg)
 {
     switch (arg)
     {
+        case ACTX: return "CONTEXT";
         case ANAM: return "NAME";
         case APTH: return "PATH";
         case APRT: return "PORT";

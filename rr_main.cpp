@@ -558,7 +558,7 @@ void init(int argc, char **argv, char **envp)
     {   // Record:
         thread_init();
         pcap_write_open(option_pcap, SCHED_FD);
-        record_init(envp);
+        record_init(argv, envp);
         pcap_write_open(option_pcap, 0);
         pcap_write_open(option_pcap, 1);
         pcap_write_open(option_pcap, 2);

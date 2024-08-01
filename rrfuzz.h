@@ -27,6 +27,8 @@
 #define PCAP_FILENO             999
 #define CONFIG_FILENO           998
 
+#define ACTX                    250
+
 struct CONFIG                   // RRFuzz config
 {
     bool debug;                 // Attach debugger?
@@ -45,6 +47,16 @@ struct CONFIG                   // RRFuzz config
     uint16_t cpu;               // CPU number.
     size_t count;               // Max executions.
     char strs[];                // String options
+};
+
+struct CONTEXT                  // Execution context/
+{
+    uint32_t cpu;               // Which CPU to run on.
+    pid_t pid;                  // Process ID
+    uint32_t argc;              // Length of argv[]
+    uint32_t envl;              // Length of envp[]
+    uint32_t size;              // Size of args[]
+    char args[];                // argv[] followed by envp[].
 };
 
 #endif

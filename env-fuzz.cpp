@@ -117,17 +117,6 @@ void warning(const char *msg, ...)
 }
 
 /*
- * Dup a string.
- */
-static char *dupStr(const char *str)
-{
-    size_t len = strlen(str);
-    char *str_2 = new char[len+1];
-    memcpy(str_2, str, len+1);
-    return str_2;
-}
-
-/*
  * Parse an int.
  */
 static int64_t parseInt(const char *name, const char *val, int64_t lb,
@@ -342,97 +331,18 @@ static int openPCAPFile(const char *filename, char mode)
 }
 
 /*
- * Save/restore the command-line.
- */
-static void getCommandLineFilename(const std::string &dirname,
-    std::string &filename)
-{
-    filename += dirname;
-    filename += '/';
-    filename += "COMMAND.cmd";
-}
-static void printEscString(FILE *stream, const std::string &str)
-{
-    fputc('\"', stream);
-    for (size_t i = 0, len = str.size(); i < len; i++)
-    {
-        if (str[i] == '\"')
-            fputs("\\\"", stream);
-        else
-            fputc(str[i], stream);
-    }
-    fputc('\"', stream);
-}
-static void saveCommandLine(const std::string &progname, int argc, char **argv,
-    int optind, const std::string &dirname)
-{
-    std::string filename;
-    getCommandLineFilename(dirname, filename);
-    FILE *stream = fopen(filename.c_str(), "w");
-    if (stream == nullptr)
-        error("failed to open file \"%s\" for writing: %s",
-            filename.c_str(), strerror(errno));
-    printEscString(stream, progname);
-    for (int i = optind; i < argc; i++)
-    {
-        std::string str(argv[i]);
-        fputc(' ', stream);
-        printEscString(stream, str);
-    }
-    fputc('\n', stream);
-    fclose(stream);
-}
-static bool loadEscString(FILE *stream, std::string &str)
-{
-    char c;
-    while (isspace(c = getc(stream)))
-        ;
-    if (c == EOF || c != '\"')
-        return false;
-    while ((c = getc(stream)) != '\"')
-    {
-        if (c == EOF || (c == '\\' && (c = getc(stream)) != '\"'))
-            return false;
-        str += c;
-    }
-    return true;
-}
-static void loadCommandLine(const std::string &dirname,
-    std::string &progname, std::vector<char *> &args)
-{
-    std::string filename;
-    getCommandLineFilename(dirname, filename);
-    FILE *stream = fopen(filename.c_str(), "r");
-    if (stream == nullptr)
-        error("failed to open file \"%s\" for reading: %s",
-            filename.c_str(), strerror(errno));
-    if (!loadEscString(stream, progname))
-        goto parse_error;
-    while (true)
-    {
-        std::string arg;
-        if (!loadEscString(stream, arg))
-        {
-            if (feof(stream))
-                break;
-            goto parse_error;
-        }
-        args.push_back(dupStr(arg.c_str()));
-    }
-    fclose(stream);
-    if (args.size() == 0)
-    {
-        parse_error:
-        error("failed to parse file \"%s\"; expected `\"'",
-            filename.c_str());
-    }
-    args.push_back(nullptr);
-    args.shrink_to_fit();
-}
-
-/*
  * Setup the output directory.
  */
+static int lockDir(const std::string &outname)
+{
+    std::string lockname(outname);
+    lockname += "/LOCK";
+    int fd = open(lockname.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    if (fd < 0 || lockf(fd, F_TLOCK, 0) < 0)
+        error("failed to lock directory \"%s\" (already in use?)",
+            outname.c_str());
+    return fd;
+}
 static int removeCallback(const char *path, const struct stat *sb,
     int type, struct FTW *ftwbuf)
 {
@@ -440,7 +350,7 @@ static int removeCallback(const char *path, const struct stat *sb,
         error("failed to delete \"%s\": %s", path, strerror(errno));
     return 0;
 }
-static void rmDir(const std::string outname, const char *name)
+static void rmDir(const std::string &outname, const char *name)
 {
     std::string dirname(outname);
     dirname += '/';
@@ -460,6 +370,7 @@ static void makeDir(const std::string &outname, const char *name)
 }
 static void setupRecordDir(const std::string &outname)
 {
+    int fd = lockDir(outname);
     std::string bakname(outname);
     bakname += ".bak";
 
@@ -470,12 +381,15 @@ static void setupRecordDir(const std::string &outname)
     // Move old output directory:
     if (rename(outname.c_str(), bakname.c_str()) && errno != ENOENT)
         error("failed to rename \"%s\": %s", outname.c_str(), strerror(errno));
+    close(fd);
 
     // Make new output directory:
     makeDir(outname, "");
+    (void)lockDir(outname);
 }
 static void resetRecordDir(const std::string &outname)
 {
+    (void)lockDir(outname);
     rmDir(outname, "crash");
     rmDir(outname, "hang");
     rmDir(outname, "abort");
@@ -484,6 +398,7 @@ static void resetRecordDir(const std::string &outname)
 }
 static void setupFuzzDir(const std::string &outname)
 {
+    (void)lockDir(outname);
     // Create fuzzer sub-directories:
     makeDir(outname, "crash");
     makeDir(outname, "hang");
@@ -505,120 +420,167 @@ static void realPath(std::string &filename)
 }
 
 /*
+ * Get the CONTEXT structure.
+ */
+static const CONTEXT *getContext(const std::string &pcapname)
+{
+    // Read the CONTEXT from the PCAP file:
+    const char *filename = pcapname.c_str();
+    int fd = openPCAPFile(filename, 'r');
+    FILE *stream = fdopen(fd, "r");
+    if (stream == NULL)
+        error("failed to open file \"%s\" for reading: %s",
+            filename, strerror(errno));
+    struct pcap_s pcap;
+    if (fread(&pcap, sizeof(pcap), 1, stream) != 1)
+        error("failed to read PCAP header from \"%s\": %s",
+            filename, strerror(errno));
+    if (pcap.magic != PCAP_MAGIC ||
+            pcap.major != 2 || pcap.minor != 4 ||
+            pcap.snaplen != INT32_MAX ||
+            pcap.linktype != LINKTYPE)
+        error("failed to parse PCAP header from \"%s\"", filename);
+
+    // Read the CONTEXT struct directly from the file.  This assumes:
+    // (1) The SYS_setcontext message is in the 4th packet.
+    // (2) The first 3 packets are TCP control (SYN/SYNACK/ACK).
+    // (3) The envp AUX data is a fixed offset within the 4th packet.
+    // This is very ugly, but parsing the PCAP file "properly" would
+    // take a lot of code so it is not worth it.
+    off_t offset = 4 * (/*sizeof(packet_s)=*/16 +
+                        /*sizeof(ethhdr)=*/14 +
+                        /*sizeof(ip6_hdr)=*/40 +
+                        /*sizeof(tcphdr)=*/20 +
+                        /*sizeof(fcs)=*/4) +
+                        /*sizeof(SYSCALL)=*/64 - /*sizeof(fcs)=*/4;
+    uint8_t tmp[offset];
+    if (fread(tmp, sizeof(uint8_t), sizeof(tmp), stream) != sizeof(tmp))
+        error("failed to seek to CONTEXT AUX data: %s", strerror(errno));
+    AUX aux;
+    if (fread(&aux, sizeof(aux), 1, stream) != 1)
+        error("failed to head CONTEXT AUX data: %s", strerror(errno));
+    if (aux.kind != ACTX || aux.mask != /*MI_____=*/0x1 ||
+            aux.size == 0 || aux.size > /*AUX_MAX=*/0xFFFFFF)
+        error("failed to parse CONTEXT AUX data");
+    if (aux.size < sizeof(CONTEXT))
+        error("failed to parse CONTEXT data; size too small");
+    char *buf = new char[aux.size];
+    if (fread(buf, sizeof(char), aux.size, stream) != aux.size)
+        error("failed to read CONTEXT data: %s", strerror(errno));
+    fclose(stream);
+    const CONTEXT *ctx = (CONTEXT *)buf;
+    if (aux.size != sizeof(CONTEXT) + ctx->size || buf[aux.size-1] != '\0')
+        error("failed to parse CONTEXT data");
+
+    return (CONTEXT *)buf;
+}
+
+/*
  * Set the CPU number.
  */
-static uint16_t setCPU(const std::string &outdir, int cpu)
+static bool lockCPU(int cpu, bool lock)
 {
-    std::string cpuname(outdir);
-    cpuname += "/CPU.cpu";
-    FILE *stream = nullptr;
-    if (cpu < 0)
+    if (!lock)
+        return true;
+    std::string lockstr("/tmp/env-fuzz.CPU_");
+    lockstr += std::to_string(cpu);
+    const char *lockname = lockstr.c_str();
+    int fd = open(lockname, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    if (fd < 0)
+        return false;
+    if (lockf(fd, F_TLOCK, 0) < 0)
     {
-        stream = fopen(cpuname.c_str(), "r");
-        if (stream == nullptr)
-            error("failed to open \"%s\" for reading: %s",
-                cpuname.c_str(), strerror(errno));
-        if (fscanf(stream, "%d", &cpu) != 1 ||
-                cpu < 0 || cpu >= UINT16_MAX)
-            error("failed to parse \"%s\"", cpuname.c_str());
+        close(fd);
+        return false;
     }
-    else
-    {
-        stream = fopen(cpuname.c_str(), "w");
-        if (stream == nullptr)
-            error("failed to open \"%s\" for writing: %s",
-                cpuname.c_str(), strerror(errno));
-        fprintf(stream, "%d\n", cpu);
-    }
-    fclose(stream);
+    // fd is kept open & locked, and only closed on termination.
 
     cpu_set_t set;
     CPU_ZERO(&set);
     CPU_SET(cpu, &set);
     if (sched_setaffinity(getpid(), sizeof(set), &set) < 0)
         error("failed to set CPU %u affinity: %s", cpu, strerror(errno));
+    return true;
+}
+static uint16_t getCPU(const CONTEXT *ctx, int cpu, bool lock)
+{
+    cpu = (ctx != nullptr? ctx->cpu: cpu);
+    if (cpu >= 0)
+    {
+        if (!lockCPU(cpu, lock))
+            error("failed to acquire lock for CPU #%d "
+                "(already in use?)", cpu);
+    }
+    else
+    {
+        // Find a free CPU:
+        int ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+        ncpu = std::min(UINT16_MAX, ncpu);
+        for (int i = 0; i < ncpu; i++)
+        {
+            if (lockCPU(i, lock))
+            {
+                cpu = i;
+                break;
+            }
+        }
+        if (cpu < 0)
+            error("failed to acquire lock for any CPU");
+    }
     return (uint16_t)cpu;
 }
 
 /*
- * Set the environment.
+ * Get the command-line and environment variables.
  */
-static void setEnv(bool replay, const std::string &pcapname, char **envp)
+static void getEnv(const CONTEXT *ctx, int optind, char ***argvp,
+    int *argcp, char ***envpp, std::vector<char *> &args,
+    std::vector<char *> &envs)
 {
-    // Read the envp (for replay)
-    if (replay)
+    if (ctx != nullptr)
     {
-        // Read the envp from the PCAP file:
-        const char *filename = pcapname.c_str();
-        int fd = openPCAPFile(filename, 'r');
-        FILE *stream = fdopen(fd, "r");
-        if (stream == NULL)
-            error("failed to open file \"%s\" for reading: %s",
-                filename, strerror(errno));
-        struct pcap_s pcap;
-        if (fread(&pcap, sizeof(pcap), 1, stream) != 1)
-            error("failed to read PCAP header from \"%s\": %s",
-                filename, strerror(errno));
-        if (pcap.magic != PCAP_MAGIC ||
-                pcap.major != 2 || pcap.minor != 4 ||
-                pcap.snaplen != INT32_MAX ||
-                pcap.linktype != LINKTYPE)
-            error("failed to parse PCAP header from \"%s\"", filename);
-
-        // Read the envp directly from the file.  This assumes:
-        // (1) The SYS_setenvp message is in the 4th packet.
-        // (2) The first 3 packets are TCP control (SYN/SYNACK/ACK).
-        // (3) The envp AUX data is a fixed offset within the 4th packet.
-        // This is very ugly, but parsing the PCAP file "properly" would
-        // take a lot of code so it is not worth it.
-        off_t offset = 4 * (/*sizeof(packet_s)=*/16 +
-                            /*sizeof(ethhdr)=*/14 +
-                            /*sizeof(ip6_hdr)=*/40 +
-                            /*sizeof(tcphdr)=*/20 +
-                            /*sizeof(fcs)=*/4) +
-                            /*sizeof(SYSCALL)=*/64 - /*sizeof(fcs)=*/4;
-        uint8_t tmp[offset];
-        if (fread(tmp, sizeof(uint8_t), sizeof(tmp), stream) != sizeof(tmp))
-            error("failed to seek to ENVP AUX data: %s", strerror(errno));
-        AUX aux;
-        if (fread(&aux, sizeof(aux), 1, stream) != 1)
-            error("failed to head ENVP AUX data: %s", strerror(errno));
-        if (aux.kind != /*ABUF=*/2 || aux.mask != /*MI_____=*/0x1 ||
-                aux.size == 0 || aux.size > /*AUX_MAX=*/0xFFFFFF)
-            error("failed to parse ENVP AUX data");
-        char *buf = new char[aux.size];
-        if (fread(buf, sizeof(char), aux.size, stream) != aux.size)
-            error("failed to read ENVP data: %s", strerror(errno));
-        fclose(stream);
-        if (buf[aux.size-1] != '\0')
-            error("failed to parse ENVP data");
-
-        // Parse the ENVP:
-        if (clearenv() != 0)
-            error("failed to clear the environment");
-        for (size_t i = 0; i < aux.size; )
+        char *ptr = (char *)ctx->args;
+        char *end = ptr + ctx->size;
+        for (unsigned i = 0; i < ctx->argc; i++)
         {
-            if (buf[i] == '\0')
-            {
-                i++;
-                continue;
-            }
-            if (putenv(buf + i) != 0)
-                error("failed to set environment \"%s\": %s",
-                    buf + i, strerror(errno));
-            for (i++; buf[i] != '\0'; i++)
-                ;
+            if (ptr >= end)
+                error("failed to parse CONTEXT data");
+            args.push_back(ptr);
+            ptr += strlen(ptr) + 1;
+        }
+        for (unsigned i = 0; i < ctx->envl; i++)
+        {
+            if (ptr >= end)
+                error("failed to parse CONTEXT data");
+            envs.push_back(ptr);
+            ptr += strlen(ptr) + 1;
         }
     }
     else
     {
-        // Normalize the environment:
-        for (size_t i = 0; envp[i] != nullptr; i++)
-        {
-            if (putenv(envp[i]) != 0)
-                error("failed to set environment \"%s\": %s",
-                    envp[i], strerror(errno));
-        }
+        char **argv = *argvp, **envp = *envpp;
+        for (int i = optind; argv[i] != nullptr; i++)
+            args.push_back(argv[i]);
+        for (int i = 0; envp[i] != nullptr; i++)
+            envs.push_back(envp[i]);
+    }
+    args.push_back(nullptr);
+    envs.push_back(nullptr);
+    args.shrink_to_fit();
+    envs.shrink_to_fit();
+    *argvp = args.data();
+    *argcp = (int)args.size()-1;
+    *envpp = envs.data();
+}
+static void setEnv(char **envp)
+{
+    if (clearenv() != 0)
+        error("failed to clear the environment");
+    for (size_t i = 0; envp[i] != nullptr; i++)
+    {
+        if (putenv(envp[i]) != 0)
+            error("failed to set environment \"%s\": %s",
+                envp[i], strerror(errno));
     }
 }
 
@@ -915,7 +877,6 @@ int main(int argc, char **argv, char **envp)
             "information", argv[0]);
     if (option_cpu > 0 && !option_record)
         error("`--cpu' can only be used in \"record\" mode");
-    option_cpu = (option_record && option_cpu < 0? 0: option_cpu);
     if (option_dir != "" && !option_record)
         error("`--dir' can only be used in \"record\" mode");
     option_dir = (option_dir == ""? ".": option_dir);
@@ -957,35 +918,31 @@ int main(int argc, char **argv, char **envp)
         error("failed to change directory to \"%s\": %s",
             option_dir.c_str(), strerror(errno));
 
-    // Get the program path:
-    std::string progname;
-    if (option_record)
-    {
-        progname = argv[optind];
-        realPath(progname);
-    }
+    // Get the CONTEXT (for replay)
+    const CONTEXT *ctx = nullptr;
+    if (option_replay || option_fuzz)
+        ctx = getContext(option_pcapname);
 
     // Save (record) or restore (replay/fuzz) the command-line:
-    std::vector<char *> args;
-    if (option_record)
-        saveCommandLine(progname, argc, argv, optind, option_outname);
-    else if (option_replay || option_fuzz)
-    {
-        loadCommandLine(option_outname, progname, args);
-        argc = args.size()-1;
-        optind = 0;
-        argv = args.data();
-    }
-    if (argv[optind] == nullptr)
-        error("missing program; try `%s --help' for more information", argv[0]);
+    const char *argv0 = argv[0];
+    std::vector<char *> args, envs;
+    if (option_record || option_replay || option_fuzz)
+        getEnv(ctx, optind, &argv, &argc, &envp, args, envs);
+    if (argv[0] == nullptr)
+        error("missing program; try `%s --help' for more information", argv0);
+    
+    // Get the program path:
+    std::string progname(argv[0]);
+    realPath(progname);
 
     // Disable ASLR (for child):
     if (personality(ADDR_NO_RANDOMIZE) < 0)
         error("failed to disable ASLR: %s", strerror(errno));
 
     // Bind to a specific CPU:
+    bool lock_cpu = (option_record || option_fuzz);
     if (option_record || option_replay || option_fuzz)
-        option_cpu = setCPU(option_outname, option_cpu);
+        option_cpu = getCPU(ctx, option_cpu, lock_cpu);
 
     // Loop over the tasks
     for (const char *task: tasks)
@@ -1087,13 +1044,13 @@ int main(int argc, char **argv, char **envp)
             }
 
             // Construct and execute the command:
-            setEnv(option_replay || option_fuzz, option_pcapname, envp);
+            setEnv(envp);
             std::vector<const char *> args;
             args.push_back(interp.c_str());
             args.push_back("--library-path");
             args.push_back(libname.c_str());
             args.push_back(path.c_str());
-            for (int i = optind+1; argv[i] != nullptr; i++)
+            for (int i = 1; argv[i] != nullptr; i++)
                 args.push_back(argv[i]);
             args.push_back(nullptr);
             execvp(interp.c_str(), (char * const *)args.data());
