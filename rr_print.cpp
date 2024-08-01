@@ -1483,9 +1483,21 @@ static bool print_arg(PRINTER &P, const INFO *info, const SYSCALL *call,
 }
 
 /*
+ * Print an argument as a value.
+ */
+static void print_val(PRINTER &P, const INFO *info, uint8_t arg,
+    intptr_t val, size_t prev, size_t next, size_t size)
+{
+    if (arg_is_pointer(arg))
+        P.format("%p", (void *)val);
+    else
+        print_arg(P, info, arg, val, prev, next, size);
+}
+
+/*
  * Print a result.
  */
-void print_result(PRINTER &P, uint8_t kind, intptr_t result)
+static void print_result(PRINTER &P, uint8_t kind, intptr_t result)
 {
     if (result < 0)
     {

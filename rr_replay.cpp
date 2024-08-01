@@ -276,7 +276,7 @@ static bool validate(const SYSCALL *exp, const SYSCALL *call)
             error:
                     print_aux(P.reset(), info, exp, i);
                     print_arg(Q.reset(), info, call, i);
-                    mismatch("mismatch detected for %s() arg #%d (%s)"
+                    mismatch("buffer mismatch detected for %s() arg #%d (%s)"
                         "\n\texpected %s\n\tgot      %s",
                         syscall_name(call->no), i+1, arg_name(arg),
                         P.str(), Q.str());
@@ -290,11 +290,11 @@ static bool validate(const SYSCALL *exp, const SYSCALL *call)
                 if (call->args[i].val != exp->args[i].val)
                 {
                     arg = (arg_is_pointer(arg)? APTR: arg);
-                    print_arg(P.reset(), info, arg, exp->args[i].val,  prev,
+                    print_val(P.reset(), info, arg, exp->args[i].val,  prev,
                         next, size);
-                    print_arg(Q.reset(), info, arg, call->args[i].val, prev,
+                    print_val(Q.reset(), info, arg, call->args[i].val, prev,
                         next, size);
-                    mismatch("mismatch detected for %s() arg #%d (%s); "
+                    mismatch("value mismatch detected for %s() arg #%d (%s); "
                         "expected %s, got %s",
                         syscall_name(call->no), i+1, arg_name(arg),
                         P.str(), Q.str());

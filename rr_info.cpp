@@ -924,7 +924,7 @@ static bool arg_is_pointer(uint8_t arg)
         case AMSG: case ABFP: case AUNM: case AENT: case AE64: case ASYS:
         case A_SA: case ASFS: case ALIM: case AUSE: case ASTX: case AC3A:
         case A_SI: case AEPE: case AEPA: case A_MM: case A_IA: case A_SS:
-        case ACPU: case ASTK:
+        case ACPU: case ASTK: case AIOA:
             return true;
         default:
             return false;
