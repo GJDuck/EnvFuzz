@@ -338,6 +338,8 @@ static int lockDir(const std::string &outname)
     std::string lockname(outname);
     lockname += "/LOCK";
     int fd = open(lockname.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    if (fd < 0 && errno == ENOENT)
+        return -1;
     if (fd < 0 || lockf(fd, F_TLOCK, 0) < 0)
         error("failed to lock directory \"%s\" (already in use?)",
             outname.c_str());
@@ -371,17 +373,21 @@ static void makeDir(const std::string &outname, const char *name)
 static void setupRecordDir(const std::string &outname)
 {
     int fd = lockDir(outname);
-    std::string bakname(outname);
-    bakname += ".bak";
+    if (fd > 0)
+    {
+        std::string bakname(outname);
+        bakname += ".bak";
 
-    // Delete old backup directory:
-    std::string currdir(".");
-    rmDir(currdir, bakname.c_str());
+        // Delete old backup directory:
+        std::string currdir(".");
+        rmDir(currdir, bakname.c_str());
 
-    // Move old output directory:
-    if (rename(outname.c_str(), bakname.c_str()) && errno != ENOENT)
-        error("failed to rename \"%s\": %s", outname.c_str(), strerror(errno));
-    close(fd);
+        // Move old output directory:
+        if (rename(outname.c_str(), bakname.c_str()) && errno != ENOENT)
+            error("failed to rename \"%s\": %s", outname.c_str(),
+                strerror(errno));
+        close(fd);
+    }
 
     // Make new output directory:
     makeDir(outname, "");
