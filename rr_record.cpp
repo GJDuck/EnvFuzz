@@ -339,6 +339,13 @@ static int record_hook(STATE *state)
             E = fd_open((int)call->result, S_IFSOCK, call->arg2.i32, 0x0,
                 socket_name((int)call->result, name, sizeof(name)));
             goto handler;
+        case SYS_socketpair:
+            fds = call->arg3.fds;
+            E = fd_open(fds[0], S_IFSOCK, call->arg2.i32, 0x0,
+                socket_name(fds[0], name, sizeof(name)));
+            F = fd_open(fds[1], S_IFSOCK, call->arg2.i32, 0x0,
+                socket_name(fds[0], name, sizeof(name)));
+            goto handler;
         case SYS_eventfd: case SYS_eventfd2:
             E = fd_open((int)call->result, S_IFSOCK, SOCK_DGRAM, 0x0,
                 event_name((int)call->result, name, sizeof(name)));

@@ -564,6 +564,16 @@ static int replay_hook(STATE *state)
             fd_open((int)call->result, S_IFSOCK, call->arg2.i32, 0x0,
                 socket_name((int)call->result, name, sizeof(name)));
             goto handler;
+        case SYS_socketpair:
+            fds = call->arg3.fds;
+            if (!aux_get(aux, (uint8_t *)fds, sizeof(int[2]), M___I__, AFD2))
+                error("missing (%s) data for %s() arg #%d",
+                    arg_name(AFD2), syscall_name(call->no), 1);
+            fd_open(fds[0], S_IFSOCK, call->arg2.i32, 0x0,
+                socket_name(fds[0], name, sizeof(name)));
+            fd_open(fds[1], S_IFSOCK, call->arg2.i32, 0x0,
+                socket_name(fds[0], name, sizeof(name)));
+            goto handler;
         case SYS_eventfd: case SYS_eventfd2:
             fd_eventfd((int)call->result, call->arg0.u32,
                 (call->no == SYS_eventfd2? call->arg1.flags: 0x0),
