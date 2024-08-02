@@ -701,7 +701,7 @@ static const INFO TABLE[] =
     {"fspick",                  0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
     {"pidfd_open",              0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
     {"clone3",                  0, 1, PTHR, {AC3A, ASIZ, A___, A___, A___, A___}, RDEC, M______},
-    {"close_range",             0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
+    {"close_range",             0, 0, P_FD, {A_FD, A_FD, AHEX, A___, A___, A___}, R__0, M______},
     {"openat2",                 0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
     {"pidfd_getfd",             0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
     {"faccessat2",              0, 0, P_FD, {ADIR, ASTR, AOCT, AHEX, A___, A___}, R__0, M______},

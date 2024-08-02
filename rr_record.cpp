@@ -115,8 +115,8 @@ static void record_init(char **argv, char **envp)
 
     call->no = SYS_setcontext;
     call->id = 1;
-    call->arg0.buf  = (uint8_t *)P.str();
-    call->arg1.size = P.len();
+    call->arg0.buf  = (uint8_t *)ctx;
+    call->arg1.size = size;
     {
         AUXVEC auxv(call);
         auxv.push(ctx, size, MI_____, ACTX);
@@ -209,6 +209,9 @@ static int record_hook(STATE *state)
                 default:
                     goto syscall;
             }
+            break;
+        case /*SYS_close_range=*/436:
+            call->result = -ENOSYS;
             break;
         case SYS_rt_sigaction:
             call->result = signal_action(call->arg0.sig,
