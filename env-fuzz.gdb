@@ -3,7 +3,7 @@ handle SIGSYS nostop noprint
 handle SIGSTOP nostop noprint
 catch signal SIGSEGV
 commands
- if $_siginfo.si_code > 2
+ if $_siginfo.si_code > 32
   echo [env-fuzz]: Benign cpuid/rdtsc SEGV...Ignoring.
   continue
  end
