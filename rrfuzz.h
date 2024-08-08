@@ -29,6 +29,10 @@
 
 #define ACTX                    250
 
+#define FORK_CHILD              0
+#define FORK_PARENT             1
+#define FORK_FAIL               2
+
 struct CONFIG                   // RRFuzz config
 {
     bool debug;                 // Attach debugger?
@@ -39,6 +43,7 @@ struct CONFIG                   // RRFuzz config
     bool tty;                   // Is TTY? (print colors)
     bool blackbox;              // Blackbox mode?
     bool save;                  // Save-all mode?
+    uint8_t fork;               // Fork-mode?
     int8_t log;                 // Log level.
     int8_t emulate;             // Emulation level.
     int64_t seed;               // RNG seed.
@@ -53,6 +58,7 @@ struct CONTEXT                  // Execution context/
 {
     uint32_t cpu;               // Which CPU to run on.
     pid_t pid;                  // Process ID
+    uint8_t fork;               // Fork-mode
     uint32_t argc;              // Length of argv[]
     uint32_t envl;              // Length of envp[]
     uint32_t size;              // Size of args[]

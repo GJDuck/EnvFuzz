@@ -47,6 +47,7 @@ static bool option_fsgsbase         = false;    // fsgsbase support?
 static int option_log               = 0;        // Log-level.
 static int option_emulate           = 0;        // Emulation-level.
 static int64_t option_seed          = 0;        // RNG seed.
+static uint8_t option_fork          = 0;        // Fork-mode.
 static const char *option_filename  = NULL;     // Recording filename.
 static const char *option_patchname = NULL;     // Patch filename.
 static const char *option_outname   = NULL;     // Output dirname.
@@ -440,6 +441,7 @@ static void parse_config(void)
     option_cpu      = config->cpu;
     option_timeout  = config->timeout;
     option_seed     = config->seed;
+    option_fork     = config->fork;
     const char *strs[4];
     size_t i = 0, n = (size_t)r - sizeof(CONFIG);
     for (size_t j = 0; j < sizeof(strs) / sizeof(strs[0]); j++)

@@ -71,6 +71,7 @@ struct THREAD
 #define THREAD_TLS      0xb8    // Unused %fs offset
 #define MAX_CPU         4096    // (Assumed) max CPU number
 static int thread_id = 0;       // Next thread-ID
+static pid_t INFO_pid = 0;      // Process-ID
 
 /*
  * Thread run lock.
@@ -168,8 +169,16 @@ extern "C"
  */
 static long thread_fork(void)
 {
-    mutex_settid(INT_MIN);
-    return 0;       // Follow child
+    switch (option_fork)
+    {
+        case FORK_PARENT:
+            return INFO_pid+1;      // Follow parent
+        case FORK_CHILD:
+            mutex_settid(INT_MIN);
+            return 0;               // Follow child
+        case FORK_FAIL: default:
+            return -ENOSYS;
+    }
 }
 
 /*
@@ -268,6 +277,7 @@ static NORETURN void thread_exit(STATE *state)
  */
 static void thread_init(void)
 {
+    INFO_pid = getpid();
     THREAD *self = thread_new(NULL);
     thread_set_self(self);
     mutex_unlock(&thread_mutex);

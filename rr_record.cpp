@@ -108,6 +108,7 @@ static void record_init(char **argv, char **envp)
     CONTEXT *ctx = (CONTEXT *)xmalloc(size);
     ctx->cpu  = option_cpu;
     ctx->pid  = pid;
+    ctx->fork = option_fork;
     ctx->argc = argc;
     ctx->envl = envl;
     ctx->size = P.len();

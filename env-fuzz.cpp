@@ -710,6 +710,8 @@ static void usage(const char *progname)
         "\t\tRun the program in DIR\n"
         "\t--emulate LEVEL, -e LEVEL\n"
         "\t\tSet the fuzzer emulation LEVEL.\n"
+        "\t--fork MODE\n"
+        "\t\tSet the fork MODE to {parent,child,fail}.\n"
         "\t--hex\n"
         "\t\tLog output as hexadecimal\n"
         "\t--log LEVEL\n"
@@ -744,6 +746,7 @@ enum OPTION
     OPTION_DEPTH,
     OPTION_DIR,
     OPTION_EMULATE,
+    OPTION_FORK,
     OPTION_FUZZ,
     OPTION_HEX,
     OPTION_LOG,
@@ -771,7 +774,8 @@ int main(int argc, char **argv, char **envp)
     size_t option_count = SIZE_MAX;
     int8_t option_log = 1;
     uint16_t option_depth = 50;
-    int option_timeout = 50, option_cpu = -1, option_emulate = -1;
+    int option_timeout = 50, option_cpu = -1, option_emulate = -1,
+        option_fork = FORK_CHILD;
     int64_t option_seed = 0;
     static const struct option long_options[] =
     {
@@ -782,6 +786,7 @@ int main(int argc, char **argv, char **envp)
         {"depth",    required_argument, nullptr, OPTION_DEPTH},
         {"dir",      required_argument, nullptr, OPTION_DIR},
         {"emulate",  required_argument, nullptr, OPTION_EMULATE},
+        {"fork",     required_argument, nullptr, OPTION_FORK},
         {"hex",      no_argument,       nullptr, OPTION_HEX},
         {"log",      required_argument, nullptr, OPTION_LOG},
         {"out",      required_argument, nullptr, OPTION_OUT},
@@ -823,6 +828,14 @@ int main(int argc, char **argv, char **envp)
             case OPTION_EMULATE: case 'e':
                 option_emulate = (int)parseInt(
                     (opt == 'e'? "-e": long_options[idx].name), optarg, 0, 2);
+                break;
+            case OPTION_FORK:
+                option_fork = (strcmp(optarg, "parent") == 0? FORK_PARENT:
+                               strcmp(optarg, "child")  == 0? FORK_CHILD:
+                               strcmp(optarg, "fail")   == 0? FORK_FAIL: -1);
+                if (option_fork < 0)
+                    error("failed to parse fork-mode \"%s\"; expected one of "
+                        "{parent,child,fail}", optarg);
                 break;
             case OPTION_HEX:
                 option_hex = true; break;
@@ -948,7 +961,9 @@ int main(int argc, char **argv, char **envp)
     // Bind to a specific CPU:
     bool lock_cpu = (option_record || option_fuzz);
     if (option_record || option_replay || option_fuzz)
-        option_cpu = getCPU(ctx, option_cpu, lock_cpu);
+        option_cpu  = getCPU(ctx, option_cpu, lock_cpu);
+    if (ctx != nullptr)
+        option_fork = ctx->fork;
 
     // Loop over the tasks
     for (const char *task: tasks)
@@ -993,6 +1008,7 @@ int main(int argc, char **argv, char **envp)
         config->count    = option_count;
         config->timeout  = option_timeout;
         config->seed     = option_seed;
+        config->fork     = option_fork;
         size_t i = 0;
         memcpy(config->strs+i, option_pcapname.c_str(), option_pcapname.size()+1);
         i += option_pcapname.size()+1;

@@ -24,7 +24,6 @@
 /*
  * Emulate getpid()/etc.
  */
-static pid_t INFO_pid  = 0;
 static pid_t INFO_tid  = 0;
 static void emulate_set_pid(pid_t pid)
 {
