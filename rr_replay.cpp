@@ -358,7 +358,10 @@ mmap_error:
     else
     {
         // Read file from disk:
-        const ENTRY *E = fd_lookup(fd);
+        const ENTRY *E = fd_entry(fd);
+        if (E == NULL)
+            error("missing file descriptor (fd=%d) entry for %s() arg %d",
+                fd, syscall_name(call->no), 5);
         fd = open(E->name, E->flags & O_ACCMODE);
         if (fd < 0)
         {
