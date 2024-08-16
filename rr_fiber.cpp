@@ -199,6 +199,9 @@ static long fiber_fork(void)
  */
 static long fiber_clone(STATE *state, pid_t tid)
 {
+    int flags = (int)state->rdi;
+    if (flags & /*CLONE_VFORK=*/0x4000)
+        return -ENOSYS;
     const uint8_t *stack = (uint8_t *)state->rsi;
     if (stack == NULL)
         return fiber_fork();
@@ -209,7 +212,6 @@ static long fiber_clone(STATE *state, pid_t tid)
     fiber->state.rax = 0;
     fiber->state.rip += /*sizeof(syscall)=*/2;
 
-    int flags = (int)state->rdi;
     if (flags & /*CLONE_SETTLS=*/0x80000)
         fiber->fs = state->r8;
     if (flags & /*CLONE_PARENT_SETTID=*/0x100000)
@@ -231,6 +233,9 @@ static long fiber_clone3(STATE *state, pid_t tid)
 {
     const struct clone_args *args = (struct clone_args *)state->rdi;
 
+    int flags = (int)args->flags;
+    if (flags & /*CLONE_VFORK=*/0x4000)
+        return -ENOSYS;
     const uint8_t *stack = (uint8_t *)args->stack;
     if (stack == NULL)
         return fiber_fork();
@@ -242,7 +247,6 @@ static long fiber_clone3(STATE *state, pid_t tid)
     fiber->state.rax = 0;
     fiber->state.rip += /*sizeof(syscall)=*/2;
 
-    int flags = (int)args->flags;
     if (flags & /*CLONE_SETTLS=*/0x80000)
         fiber->fs = args->tls;
     if (flags & /*CLONE_PARENT_SETTID=*/0x100000)

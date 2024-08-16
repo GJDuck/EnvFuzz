@@ -186,6 +186,10 @@ static long thread_fork(void)
  */
 static long thread_clone(STATE *state)
 {
+    int flags = (int)state->rdi;
+    if (flags & /*CLONE_VFORK=*/0x4000)
+        return -ENOSYS;
+
     uintptr_t *stack = (uintptr_t *)state->rsi;
     if (stack == NULL)
         return thread_fork();
@@ -199,7 +203,6 @@ static long thread_clone(STATE *state)
     stack--;
     stack[0] = (uintptr_t)thread_start;
 
-    int flags = (int)state->rdi;
     if (flags & /*CLONE_CHILD_CLEARTID=*/0x200000)
         thread->ctid = (pid_t *)state->r10;
 
@@ -223,6 +226,10 @@ static long thread_clone3(STATE *state)
     struct clone_args *args = &args_1;
     memcpy(args, args_0, sizeof(*args));
 
+    int flags = (int)args->flags;
+    if (flags & /*CLONE_VFORK=*/0x4000)
+        return -ENOSYS;
+
     uintptr_t *stack = (uintptr_t *)args->stack;
     if (stack == 0x0)
         return thread_fork();
@@ -243,7 +250,6 @@ static long thread_clone3(STATE *state)
 
     args->stack_size = (uintptr_t)stack_size;
 
-    int flags = (int)args->flags;
     if (flags & /*CLONE_CHILD_CLEARTID=*/0x200000)
         thread->ctid = (pid_t *)args->child_tid;
 

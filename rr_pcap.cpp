@@ -445,7 +445,7 @@ static MSG *pcap_read(FILE *pcap, const char *filename, uint32_t *pkt_id,
         len -= sizeof(struct tcphdr);
         uint32_t fcs = 0;
         uint8_t *data = NULL;
-        if (len > 0)
+        if ((tcp->th_flags & TH_URG))
         {
             push = ((tcp->th_flags & TH_PUSH) != 0);
             if (msg == NULL || len > space)
@@ -464,7 +464,7 @@ static MSG *pcap_read(FILE *pcap, const char *filename, uint32_t *pkt_id,
             else
                 space -= len;
             data = msg->payload + msg->len;
-            if (fread(data, len, 1, pcap) != 1)
+            if (len > 0 && fread(data, len, 1, pcap) != 1)
                 error("failed to read packet data from \"%s\": %s",
                     filename, strerror(errno));
             msg->len += len;
