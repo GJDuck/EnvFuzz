@@ -79,7 +79,7 @@ struct PATCH                    // Patch representation
     bool save(const char *patchname)
     {
         assert(filename == NULL && !disk);
-        int fd = open(patchname, O_WRONLY | O_CREAT | O_EXCL, 0777);
+        int fd = open(patchname, O_WRONLY | O_CREAT | O_EXCL, 0664);
         if (fd < 0)
         {
             if (errno == EEXIST)
