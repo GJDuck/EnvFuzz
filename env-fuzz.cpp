@@ -205,8 +205,8 @@ static void parseELF(const char *filename, std::string &path,
             ehdr->e_ident[EI_MAG1] != ELFMAG1 ||
             ehdr->e_ident[EI_MAG2] != ELFMAG2 ||
             ehdr->e_ident[EI_MAG3] != ELFMAG3)
-        error("failed to parse ELF file \"%s\"; invalid magic number",
-            filename);
+        error("failed to parse ELF file \"%s\"; invalid magic number (file not "
+            "an ELF executable?)", filename);
     if (ehdr->e_ident[EI_CLASS] != ELFCLASS64)
         error("failed to parse ELF file \"%s\"; file is not 64bit",
             filename);
@@ -578,7 +578,7 @@ static void getEnv(const CONTEXT *ctx, int optind, char ***argvp,
     *argcp = (int)args.size()-1;
     *envpp = envs.data();
 }
-static void setEnv(char **envp)
+static void setEnv(char **envp, const std::string &preloads)
 {
     if (clearenv() != 0)
         error("failed to clear the environment");
@@ -587,6 +587,15 @@ static void setEnv(char **envp)
         if (putenv(envp[i]) != 0)
             error("failed to set environment \"%s\": %s",
                 envp[i], strerror(errno));
+    }
+    if (preloads != "")
+    {
+        std::string ld_preload("LD_PRELOAD=");
+        ld_preload += preloads;
+        char *str = strdup(ld_preload.c_str());
+        if (str == nullptr || putenv(str) != 0)
+            error("failed to set environment \"%s\": %s",
+                ld_preload.c_str(), strerror(errno));
     }
 }
 
@@ -720,6 +729,8 @@ static void usage(const char *progname)
         "\t\tSet the output directory to be DIR\n"
         "\t--pcap FILE\n"
         "\t\tSave (record) or load (replay) to FILE\n"
+        "\t--preload LIBRARY\n"
+        "\t\tPreload LIBRARY using LD_PRELOAD\n"
         "\t--save\n"
         "\t\tNever delete \"interesting\" patches\n"
         "\t--seed SEED\n"
@@ -752,6 +763,7 @@ enum OPTION
     OPTION_LOG,
     OPTION_OUT,
     OPTION_PCAP,
+    OPTION_PRELOAD,
     OPTION_RECORD,
     OPTION_REPLAY,
     OPTION_SAVE,
@@ -767,6 +779,7 @@ int main(int argc, char **argv, char **envp)
     std::string option_dir("");
     std::string option_pcapname("RECORD.pcap.gz");
     std::string option_outname("./out");
+    std::string option_preload("");
     bool option_debug = false, option_fuzz = false, option_hex = false,
          option_record = false, option_replay = false, option_reset = false,
          option_blackbox = false, option_save = false,
@@ -791,6 +804,7 @@ int main(int argc, char **argv, char **envp)
         {"log",      required_argument, nullptr, OPTION_LOG},
         {"out",      required_argument, nullptr, OPTION_OUT},
         {"pcap",     required_argument, nullptr, OPTION_PCAP},
+        {"preload",  required_argument, nullptr, OPTION_PRELOAD},
         {"save",     no_argument,       nullptr, OPTION_SAVE},
         {"seed",     required_argument, nullptr, OPTION_SEED},
         {"timeout",  required_argument, nullptr, OPTION_TIMEOUT},
@@ -847,6 +861,11 @@ int main(int argc, char **argv, char **envp)
                 option_outname = optarg; break;
             case OPTION_PCAP:
                 option_pcapname = optarg; break;
+            case OPTION_PRELOAD:
+                if (option_preload != "")
+                    option_preload += ':';
+                option_preload += optarg;
+                break;
             case OPTION_SAVE:
                 option_save = true; break;
             case OPTION_SEED:
@@ -898,6 +917,8 @@ int main(int argc, char **argv, char **envp)
         error("`--cpu' can only be used in \"record\" mode");
     if (option_dir != "" && !option_record)
         error("`--dir' can only be used in \"record\" mode");
+    if (option_preload != "" && !option_record)
+        error("`--preload' can only be used in \"record\" mode");
     option_dir = (option_dir == ""? ".": option_dir);
     if (option_emulate >= 0 && !option_fuzz && !option_replay)
         error("`--emulate' can only be used in \"fuzz\" or \"replay\" modes");
@@ -1066,7 +1087,7 @@ int main(int argc, char **argv, char **envp)
             }
 
             // Construct and execute the command:
-            setEnv(envp);
+            setEnv(envp, option_preload);
             std::vector<const char *> args;
             args.push_back(interp.c_str());
             args.push_back("--library-path");
