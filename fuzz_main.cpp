@@ -33,6 +33,7 @@ static bool option_blackbox = false;    // Blackbox mode?
 struct COVERAGE                 // Coverage bitmap
 {
     void (*callback)(intptr_t loc);
+    uint64_t nonce[2];          // Random nonce
     uint32_t prev_loc;          // prev_loc
     uint32_t mask;              // Mask
     uint8_t map[MAP_SIZE];      // Bits
@@ -172,6 +173,8 @@ static void coverage_init(COVERAGE *cov, uint8_t *map)
     cov = (cov == NULL? &cov_0: cov);
     map = (map == NULL? map_0:  map);
     cov->callback = NULL;
+    if (getrandom(&cov->nonce, sizeof(cov->nonce), 0) < 0)
+        error("failed to get random nonce: %s", strerror(errno));
     if (syscall(SYS_arch_prctl, /*ARCH_SET_GS=*/0x1001, cov) < 0)
         error("failed to set %%gs register: %s", strerror(errno));
     fuzzer_cov = cov;

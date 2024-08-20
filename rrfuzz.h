@@ -27,11 +27,14 @@
 #define PCAP_FILENO             999
 #define CONFIG_FILENO           998
 
-#define ACTX                    250
+#define ACTX                    250     // CONTEXT structure
 
-#define FORK_CHILD              0
-#define FORK_PARENT             1
-#define FORK_FAIL               2
+#define SYS_enable              340     // Enable record&replay
+#define SYS_disable             341     // Disable record&replay
+
+#define FORK_CHILD              0       // fork() follows child
+#define FORK_PARENT             1       // fork() follows parent
+#define FORK_FAIL               2       // fork() fails
 
 struct CONFIG                   // RRFuzz config
 {
@@ -64,5 +67,14 @@ struct CONTEXT                  // Execution context/
     uint32_t size;              // Size of args[]
     char args[];                // argv[] followed by envp[].
 };
+
+static inline void rr_enable(void)
+{
+    (void)syscall(SYS_enable);
+}
+static inline void rr_disable(void)
+{
+    (void)syscall(SYS_disable);
+}
 
 #endif

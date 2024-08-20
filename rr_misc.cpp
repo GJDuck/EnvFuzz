@@ -51,8 +51,6 @@
 #define SYS_unused      337         // Unused
 #define SYS_setcontext  338         // Set context
 #define SYS_signal      339         // Signal
-#define SYS_enable      340         // Enable record&replay
-#define SYS_disable     341         // Disable record&replay
 
 #define MMAP_RECORD_MAX UINT16_MAX  // mmap() record threshold
 
