@@ -45,6 +45,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <asm/prctl.h>
+#include <sys/prctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -55,6 +56,9 @@
 #define REZZAN_ALIAS(X)     __attribute__((__alias__(X)))
 #define REZZAN_CONSTRUCTOR  __attribute__((__constructor__(101)))
 #define REZZAN_DESTRUCTOR   __attribute__((__destructor__(101)))
+
+#define REZZAN_BASE         0xccc00000000ull
+#define REZZAN_MAX          (1ull << 32)                // 4GB
 
 static bool option_enabled  = false;
 static bool option_inited   = false;
@@ -154,6 +158,8 @@ extern void *__libc_realloc(void *ptr, size_t size);
 extern void *__libc_calloc(size_t nmemb, size_t size);
 extern int __vsnprintf (char *string, size_t maxlen, const char *format,
                       va_list args, unsigned int mode_flags);
+
+extern int arch_prctl(int code, unsigned long *addr);
 
 /*
  * Low-level memory operations.
@@ -289,6 +295,8 @@ static bool is_poisoned(Token *ptr64)
             return rezzan_test_token61(ptr64);
         case 64:
             return rezzan_test_token64(ptr64);
+        default:
+            return false;
     }
 }
 
@@ -299,6 +307,8 @@ static void check_poisoned(const void *ptr, size_t n)
 {
     // Check the token of the destination
     uintptr_t iptr = (uintptr_t)ptr;
+    if (iptr + n < REZZAN_BASE || iptr > REZZAN_BASE + REZZAN_MAX)
+        return;
     size_t front_delta = iptr % sizeof(Token);
     int check_len = n + front_delta;
     iptr -= front_delta;
@@ -317,7 +327,8 @@ static void check_poisoned(const void *ptr, size_t n)
     {
         // Check the token after the current memory for byte-accurate checking
         ptr64 += check_len;
-        if ((uintptr_t)ptr64 % PAGE_SIZE != 0 && rezzan_test_token61((const Token *)ptr64))
+        if ((uintptr_t)ptr64 % PAGE_SIZE != 0 &&
+                rezzan_test_token61((const Token *)ptr64))
         {
             Token tail_token = *ptr64;
             if (tail_token.boundary && (tail_token.boundary < end_delta))
@@ -358,8 +369,10 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
 
     option_tty = isatty(STDERR_FILENO);
     unsigned long gs;
+    rr_disable();
     if (arch_prctl(ARCH_GET_GS, &gs) < 0 || gs == 0x0)
         error("this version of ReZZan is only compatiable with env-fuzz");
+    rr_enable();
 
     option_stats   = (bool)get_config("REZZAN_STATS", 0);
     option_enabled = !(bool)get_config("REZZAN_DISABLED", 0);
@@ -403,9 +416,9 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
     // Initialize malloc() pool:
     int flags  = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED |
         (option_populate? MAP_POPULATE: 0);
-    void *base   = (void *)0xccc00000000;
-    void *ptr = rezzan_mmap(base, POOL_MMAP_SIZE * sizeof(Unit), PROT_READ | PROT_WRITE,
-        flags, -1, 0);
+    void *base   = (void *)REZZAN_BASE;
+    void *ptr = rezzan_mmap(base, POOL_MMAP_SIZE * sizeof(Unit),
+        PROT_READ | PROT_WRITE, flags, -1, 0);
     if (ptr == MAP_FAILED)
         error("failed to allocate memory pool of size %zu: %s",
             pool_size, strerror(errno));
@@ -469,12 +482,11 @@ static void *pool_malloc(size_t size128)
         uint8_t *end   = (uint8_t *)(pool + pool_mmap);
         int flags  = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED |
             (option_populate? MAP_POPULATE: 0);
-        void *ptr = rezzan_mmap(start, end - start, PROT_READ | PROT_WRITE, flags,
-            -1, 0);
+        void *ptr = rezzan_mmap(start, end - start, PROT_READ | PROT_WRITE,
+            flags, -1, 0);
         if (ptr != (void *)start)
             error("failed to allocate %zu bytes for malloc pool: %s",
                 end - start, strerror(errno));
-        DEBUG("GROW %p..%p\n", start, end);
     }
     pool_ptr += size128;
     return ptr;
@@ -588,9 +600,7 @@ void rezzan_free(void *ptr)
     Token *ptr64 = (Token *)ptr;
     if (!is_poisoned(ptr64-1))
         error("bad free detected with pointer %p; pointer does not "
-            "point to the base of the object (corrupt malloc state?) "
-            "[expected=0x%.16lx, got=0x%.16lx]", ptr64, rezzan_get_nonce(),
-            ptr64[-1].nonce);
+            "point to the base of the object (corrupt malloc state?)", ptr64);
 
     // Poison the free'ed memory, and work out the object size.
     size_t i = 0;
@@ -761,33 +771,36 @@ char* strncat(char *s1, const char *s2, size_t n)
     memcpy(s1, s2, ss);
     return s;
 }
-
-wchar_t* __wmemcpy(wchar_t *s1, const wchar_t *s2, size_t n)
+wchar_t *__wmemcpy(wchar_t *dst, const wchar_t *src, size_t n)
 {
-  return (wchar_t *) memcpy ((char *) s1, (char *) s2, n * sizeof (wchar_t));
+    return (wchar_t *)memcpy((void *)dst, (const void *)src,
+        n * sizeof(wchar_t));
 }
-
-size_t __wcslen(const wchar_t *s)
+size_t __wcslen(const wchar_t *str)
 {
-  size_t len = 0;
-  while (s[len] != L'\0')
+    size_t n = 0;
+    while (true)
     {
-      if (s[++len] == L'\0')
-        return len;
-      if (s[++len] == L'\0')
-        return len;
-      if (s[++len] == L'\0')
-        return len;
-      ++len;
+        check_poisoned(str + n, 1);
+        if (str[n] == L'\0')
+            return n;
+        n++;
     }
-  return len;
 }
-
-wchar_t* wcscpy(wchar_t *dest, const wchar_t *src)
+wchar_t* wcscpy(wchar_t *dst, const wchar_t *src)
 {
-  return __wmemcpy(dest, src, __wcslen(src) + 1);
+    for (size_t i = 0; ; i++)
+    {
+        check_poisoned(src + i, 1);
+        check_poisoned(dst + i, 1);
+        dst[i] = src[i];
+        if (src[i] == '\0')
+            break;
+    }
+    return dst;
 }
 
+#if 0
 int snprintf(char *dst, size_t n, const char *format, ...)
 {
 
@@ -839,7 +852,7 @@ int printf(const char *format,...)
     va_end (arg);
     return done;
 }
-
+#endif
 
 extern void *malloc(size_t size) REZZAN_ALIAS("rezzan_malloc");
 extern void free(void *ptr) REZZAN_ALIAS("rezzan_free");
