@@ -8,6 +8,21 @@
  * 
  * Copyright (C) National University of Singapore
  *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
  * This is the core ReZZan runtime library module.
  * Please see the paper for more information:
  *
@@ -280,7 +295,7 @@ static bool is_poisoned(Token *ptr64)
 /*
  * Checking the memory region start from ptr with n length is memory safe.
  */
-static bool check_poisoned(const void *ptr, size_t n)
+static void check_poisoned(const void *ptr, size_t n)
 {
     // Check the token of the destination
     uintptr_t iptr = (uintptr_t)ptr;
@@ -292,16 +307,23 @@ static bool check_poisoned(const void *ptr, size_t n)
         check_len += sizeof(Token);
     check_len /= sizeof(Token);
     Token *ptr64 = (Token *)iptr;
-    for (size_t i = 0; i < check_len; i++) // Check the token of each memory
+    for (size_t i = 0; i < check_len; i++)
+    {
+        // Check the token of each memory
         if (is_poisoned(ptr64 + i))
-            asm ("ud2");
-    if (end_delta && nonce_size == 61) {    // Check the token after the current memory for byte-accurate checking
+            asm volatile ("ud2");
+    }
+    if (end_delta && nonce_size == 61)
+    {
+        // Check the token after the current memory for byte-accurate checking
         ptr64 += check_len;
         if ((uintptr_t)ptr64 % PAGE_SIZE != 0 && rezzan_test_token61((const Token *)ptr64))
         {
             Token tail_token = *ptr64;
-            if (tail_token.boundary && (tail_token.boundary < end_delta)) { // If the token equals to 0x00, which means 0x08
-                asm ("ud2");
+            if (tail_token.boundary && (tail_token.boundary < end_delta))
+            {
+                // If the token equals to 0x00, which means 0x08
+                asm volatile ("ud2");
             }
         }
     }
@@ -641,7 +663,6 @@ void *rezzan_calloc(size_t nmemb, size_t size)
 /*
  * The glib runtime support.
  */
-
 void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 {
     check_poisoned(dst, n);
@@ -653,7 +674,6 @@ void *memcpy(void * restrict dst, const void * restrict src, size_t n)
         dst8[i] = src8[i];
     return dst;
 }
-
 void *memmove(void * restrict dst, const void * restrict src, size_t n)
 {
     check_poisoned(dst, n);
@@ -661,127 +681,76 @@ void *memmove(void * restrict dst, const void * restrict src, size_t n)
 
     uint8_t *dst8 = (uint8_t *)dst;
     uint8_t *src8 = (uint8_t *)src;
-    if (dst8 < src8) {
-        while (n--) {
+    if (dst8 < src8)
+    {
+        while (n--)
             *dst8++ = *src8++;
-        }
     }
-    else {
+    else
+    {
         uint8_t *lasts = src8 + (n-1);
         uint8_t *lastd = dst8 + (n-1);
-        while (n--) {
+        while (n--)
             *lastd-- = *lasts--;
-        }
     }
-
     return dst;
 }
+void *memset(void *dst, int c, size_t n)
+{
+    check_poisoned(dst, n);
 
+    uint8_t *dst8 = (uint8_t *)dst;
+    for (size_t i = 0; i < n; i++)
+        dst8[i] = (uint8_t)(int8_t)c;
+    return dst;
+}
 size_t strlen(const char *str)
 {
-    /* To avoid the situation that
-        the first byte is the zero byte of the token */
-    if (is_poisoned((Token *)((uint64_t)str & -8))) {
-        asm("ud2");
+    size_t n = 0;
+    while (true)
+    {
+        check_poisoned(str + n, 1);
+        if (str[n] == '\0')
+            return n;
+        n++;
     }
-    const char *char_ptr;
-    const unsigned long int *longword_ptr;
-    unsigned long int longword, himagic, lomagic;
-    /* Handle the first few characters by reading one character at a time.
-        Do this until CHAR_PTR is aligned on a longword boundary.  */
-    for (char_ptr = str; ((unsigned long int) char_ptr
-                            & (sizeof (longword) - 1)) != 0;
-        ++char_ptr)
-        if (*char_ptr == '\0')
-        return char_ptr - str;
-    /* All these elucidatory comments refer to 4-byte longwords,
-        but the theory applies equally well to 8-byte longwords.  */
-    longword_ptr = (unsigned long int *) char_ptr;
-    /* Bits 31, 24, 16, and 8 of this number are zero.  Call these bits
-        the "holes."  Note that there is a hole just to the left of
-        each byte, with an extra at the end:
-        bits:  01111110 11111110 11111110 11111111
-        bytes: AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD
-        The 1-bits make sure that carries propagate to the next 0-bit.
-        The 0-bits provide holes for carries to fall into.  */
-    himagic = 0x80808080L;
-    lomagic = 0x01010101L;
-    if (sizeof (longword) > 4)
-        {
-        /* 64-bit version of the magic.  */
-        /* Do the shift in two steps to avoid a warning if long has 32 bits.  */
-        himagic = ((himagic << 16) << 16) | himagic;
-        lomagic = ((lomagic << 16) << 16) | lomagic;
-        }
-    if (sizeof (longword) > 8)
-        abort ();
-  /* Instead of the traditional loop which tests each character,
-     we will test a longword at a time.  The tricky part is testing
-     if *any of the four* bytes in the longword in question are zero.  */
-    for (;;)
-        {
-        longword = *longword_ptr++;
-        if (((longword - lomagic) & ~longword & himagic) != 0)
-            {
-            /* Which of the bytes was the zero?  If none of them were, it was
-                a misfire; continue the search.  */
-            const char *cp = (const char *) (longword_ptr - 1);
-            if (cp[0] == 0)
-                return cp - str;
-            if (cp[1] == 0)
-                return cp - str + 1;
-            if (cp[2] == 0)
-                return cp - str + 2;
-            if (cp[3] == 0)
-                return cp - str + 3;
-            if (sizeof (longword) > 4)
-            {
-                if (cp[4] == 0)
-                    return cp - str + 4;
-                if (cp[5] == 0)
-                    return cp - str + 5;
-                if (cp[6] == 0)
-                    return cp - str + 6;
-                if (cp[7] == 0)
-                    return cp - str + 7;
-                }
-            }
-        }
-    }
-
-size_t strnlen(const char *s, size_t maxlen)
+}
+size_t strnlen(const char *str, size_t maxlen)
 {
-    /* To avoid the situation that
-        the first byte is the zero byte of the token */
-    if (is_poisoned((Token *)((uint64_t)s & -8))) {
-        asm("ud2");
+    size_t n = 0;
+    while (n < maxlen)
+    {
+        check_poisoned(str + n, 1);
+        if (str[n] == '\0')
+            return n;
+        n++;
     }
-    size_t i;
-    for (i = 0; i < maxlen; ++i)
-        if (s[i] == '\0')
+    return maxlen;
+}
+char *strcpy(char *dst, const char *src)
+{
+    for (size_t i = 0; ; i++)
+    {
+        check_poisoned(src + i, 1);
+        check_poisoned(dst + i, 1);
+        dst[i] = src[i];
+        if (src[i] == '\0')
             break;
-    return i;
+    }
+    return dst;
 }
-
-char* strcpy(char *dest, const char *src)
+char *strcat(char *dst, const char *src)
 {
-    return memcpy(dest, src, strlen(src) + 1);
+    strcpy(dst + strlen(dst), src);
+    return dst;
 }
-
-char* strcat(char *dest, const char *src)
+char* strncpy(char *dst, const char *src, size_t n)
 {
-  strcpy(dest + strlen(dest), src);
-  return dest;
+    size_t len = strnlen(src, n);
+    if (len != n)
+        memset(dst + len, '\0', n - len);
+    return memcpy(dst, src, len + 1);
 }
-
-char* strncpy(char *s1, const char *s2, size_t n)
-{
-    size_t size = strnlen(s2, n);
-    if (size != n)
-        memset(s1 + size, '\0', n - size);
-    return memcpy(s1, s2, size + 1);
-}
-
 char* strncat(char *s1, const char *s2, size_t n)
 {
     char *s = s1;
