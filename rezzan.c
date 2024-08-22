@@ -59,6 +59,7 @@
 
 #define REZZAN_BASE         0xccc00000000ull
 #define REZZAN_MAX          (1ull << 32)                // 4GB
+#define REZZAN_MAX_ALLOC    (1ull << 20)                // 1MB = Max alloc
 
 static bool option_enabled  = false;
 static bool option_inited   = false;
@@ -120,7 +121,7 @@ union Token
     struct
     {
         uint64_t boundary:3;
-        uint64_t nonce61:61;
+        uint64_t _unused:61;
     };
     uint64_t nonce;
 };
@@ -164,86 +165,91 @@ extern int arch_prctl(int code, unsigned long *addr);
 /*
  * Low-level memory operations.
  */
-void rezzan_init_nonce61(void);
-void rezzan_set_token61(Token *ptr64, size_t boundary);
-bool rezzan_test_token61(const Token *ptr64);
-void rezzan_init_nonce64(void);
-void rezzan_set_token64(Token *ptr64);
-bool rezzan_test_token64(const Token *ptr64);
-void rezzan_zero_token(Token *ptr64);
-uint64_t rezzan_get_nonce(void);
+#define RZ_NONCE_ADDR   "%gs:0x08"      // Redzone nonce
+#define WO_NONCE_ADDR   "%gs:0x10"      // Write-only nonce
 
-#define NONCE_ADDR      "%gs:0x8"
+#define get_rz_nonce(nonce)                                             \
+    asm volatile ("movq %" RZ_NONCE_ADDR ",%0" : "=r"(nonce))
+#define set_rz_nonce(nonce)                                             \
+    asm volatile ("movq %0,%" RZ_NONCE_ADDR : : "r"(nonce))
+#define get_wo_nonce(nonce)                                             \
+    asm volatile ("movq %" WO_NONCE_ADDR ",%0" : "=r"(nonce))
+#define set_wo_nonce(nonce)                                             \
+    asm volatile ("movq %0,%" WO_NONCE_ADDR : : "r"(nonce))
+#define check_nonce(nonce, val)                                         \
+    asm volatile ("lea 1(%0,%1),%0" : "+r"(nonce) : "r"(val))
+#define negate_nonce(ptr)                                               \
+    asm volatile ("notq %0" : : "m"(*(ptr)))
 
-asm (
-    ".type rezzan_init_nonce64, @function\n"
-    ".globl rezzan_init_nonce64\n"
-    "rezzan_init_nonce64:\n"
-    "\tretq\n"
-
-    ".type rezzan_set_token64, @function\n"
-    ".globl rezzan_set_token64\n"
-    "rezzan_set_token64:\n"
-    "\tmov " NONCE_ADDR ", %rax\n"
-    "\tmov %rax,(%rdi)\n"
-    "\tnegq (%rdi)\n"
-    "\txor %eax,%eax\n"
-    "\tretq\n"
-
-    ".type rezzan_test_token64, @function\n"
-    ".globl rezzan_test_token64\n"
-    "rezzan_test_token64:\n"
-    "\tmov " NONCE_ADDR ", %rax\n"
-    "\tmov (%rdi),%rdi\n"
-    "\tlea (%rdi,%rax),%rax\n"
-    "\ttestq %rax,%rax\n"
-    "\tsete %al\n"
-    "\tretq\n"
-
-    ".type rezzan_init_nonce61, @function\n"
-    ".globl rezzan_init_nonce61\n"
-    "rezzan_init_nonce61:\n"
-    "\tmov " NONCE_ADDR ", %rax\n"
-    "\tandq $-0x8,%rax\n"
-    "\tmov %rax, " NONCE_ADDR "\n"
-    "\tretq\n"
-
-    ".type rezzan_set_token61, @function\n"
-    ".globl rezzan_set_token61\n"
-    "rezzan_set_token61:\n"
-    "\tmov " NONCE_ADDR ", %rax\n"
-    "\tnegq %rax\n"
-    "\tandq $-0x8,%rax\n"
-    "\txor %rsi,%rax\n"
-    "\tmov %rax,(%rdi)\n"
-    "\txor %eax,%eax\n"
-    "\tretq\n"
-
-    ".type rezzan_test_token61, @function\n"
-    ".globl rezzan_test_token61\n"
-    "rezzan_test_token61:\n"
-    "\tmov " NONCE_ADDR ", %rax\n"
-    "\tmov (%rdi),%rdi\n"
-    "\tandq $-0x8,%rdi\n"
-    "\tlea (%rdi,%rax),%rax\n"
-    "\ttestq %rax,%rax\n"
-    "\tsete %al\n"
-    "\tretq\n"
-
-    ".type rezzan_zero_token, @function\n"
-    ".globl rezzan_zero_token\n"
-    "rezzan_zero_token:\n"
-    "\txor %eax,%eax\n"
-    "\tmov %rax,(%rdi)\n"
-    "\rretq\n"
-
-    ".type rezzan_get_nonce, @function\n"
-    ".globl rezzan_get_nonce\n"
-    "rezzan_get_nonce:\n"
-    "\tmov " NONCE_ADDR ", %rax\n"
-    "\tnegq %rax\n"
-    "\tretq\n"
-);
+static void rezzan_init_nonce61(void)
+{
+    register uint64_t nonce;
+    get_rz_nonce(nonce);
+    nonce &= ~0x7ull;
+    set_rz_nonce(nonce);
+}
+static inline void rezzan_poison_read(Token *ptr64)
+{
+    register uint64_t nonce;
+    get_wo_nonce(nonce);
+    ptr64->nonce = nonce;
+    negate_nonce(ptr64);
+}
+static inline void rezzan_poison_write61(Token *ptr64, size_t boundary)
+{
+    boundary = ~boundary;
+    boundary &= 0x7ull;
+    register uint64_t nonce;
+    get_rz_nonce(nonce);
+    nonce |= boundary;
+    ptr64->nonce = nonce;
+    negate_nonce(ptr64);
+}
+static inline bool rezzan_check_write61(const Token *ptr64)
+{
+    register uint64_t nonce;
+    get_rz_nonce(nonce);
+    check_nonce(nonce, ptr64->nonce | 0x7ull);
+    return (nonce == 0);
+}
+static inline bool rezzan_check_read61(const Token *ptr64)
+{
+    register uint64_t nonce;
+    get_wo_nonce(nonce);
+    check_nonce(nonce, ptr64->nonce);
+    return rezzan_check_write61(ptr64) | (nonce == 0);
+}
+static void rezzan_init_nonce64(void)
+{
+    /* NOP */;
+}
+static inline void rezzan_poison_write64(Token *ptr64)
+{
+    register uint64_t nonce;
+    get_rz_nonce(nonce);
+    ptr64->nonce = nonce;
+    negate_nonce(ptr64);
+}
+static inline bool rezzan_check_write64(const Token *ptr64)
+{
+    register uint64_t nonce;
+    get_rz_nonce(nonce);
+    check_nonce(nonce, ptr64->nonce);
+    return (nonce == 0);
+}
+static inline bool rezzan_check_read64(const Token *ptr64)
+{
+    register uint64_t nonce;
+    get_wo_nonce(nonce);
+    check_nonce(nonce, ptr64->nonce);
+    return rezzan_check_write61(ptr64) | (nonce == 0);
+}
+static inline uint64_t rezzan_get_nonce(void)
+{
+    register uint64_t nonce;
+    get_rz_nonce(nonce);
+    return nonce;
+}
 
 /*
  * mmap() wrapper.
@@ -268,12 +274,23 @@ static void poison(Token *ptr64, size_t size)
         case 61:
         {
             size_t boundary = size % sizeof(Token);
-            rezzan_set_token61(ptr64, boundary);
-            return;
+            rezzan_poison_write61(ptr64, boundary);
+            break;
         }
         case 64:
-            rezzan_set_token64(ptr64);
+            rezzan_poison_write64(ptr64);
+            break;
+        default:
+            break;
     }
+}
+
+/*
+ * Poison the 64-bit aligned pointer `ptr64' for reading.
+ */
+static void poison_read(Token *ptr64)
+{
+    rezzan_poison_read(ptr64);
 }
 
 /*
@@ -281,20 +298,36 @@ static void poison(Token *ptr64, size_t size)
  */
 static void zero(Token *ptr64)
 {
-    rezzan_zero_token(ptr64);
+    ptr64->nonce = 0x0;
 }
 
 /*
  * Test if the 64-bit aligned pointer `ptr64' is poisoned or not.
  */
-static bool is_poisoned(Token *ptr64)
+static bool is_rw_poisoned(Token *ptr64)
 {
     switch (nonce_size)
     {
         case 61:
-            return rezzan_test_token61(ptr64);
+            return rezzan_check_write61(ptr64);
         case 64:
-            return rezzan_test_token64(ptr64);
+            return rezzan_check_write64(ptr64);
+        default:
+            return false;
+    }
+}
+
+/*
+ * Test if the 64-bit aligned pointer `ptr64' is poisoned for reads or not.
+ */
+static bool is_ro_poisoned(Token *ptr64)
+{
+    switch (nonce_size)
+    {
+        case 61:
+            return rezzan_check_read61(ptr64);
+        case 64:
+            return rezzan_check_read64(ptr64);
         default:
             return false;
     }
@@ -303,12 +336,12 @@ static bool is_poisoned(Token *ptr64)
 /*
  * Checking the memory region start from ptr with n length is memory safe.
  */
-static void check_poisoned(const void *ptr, size_t n)
+static bool check_rw_poisoned(const void *ptr, size_t n)
 {
     // Check the token of the destination
     uintptr_t iptr = (uintptr_t)ptr;
     if (iptr + n < REZZAN_BASE || iptr > REZZAN_BASE + REZZAN_MAX)
-        return;
+        return false;
     size_t front_delta = iptr % sizeof(Token);
     int check_len = n + front_delta;
     iptr -= front_delta;
@@ -320,25 +353,62 @@ static void check_poisoned(const void *ptr, size_t n)
     for (size_t i = 0; i < check_len; i++)
     {
         // Check the token of each memory
-        if (is_poisoned(ptr64 + i))
-            asm volatile ("ud2");
+        if (is_rw_poisoned(ptr64 + i))
+            return true;
     }
     if (end_delta && nonce_size == 61)
     {
         // Check the token after the current memory for byte-accurate checking
         ptr64 += check_len;
         if ((uintptr_t)ptr64 % PAGE_SIZE != 0 &&
-                rezzan_test_token61((const Token *)ptr64))
+                rezzan_check_write61((const Token *)ptr64))
         {
             Token tail_token = *ptr64;
             if (tail_token.boundary && (tail_token.boundary < end_delta))
             {
                 // If the token equals to 0x00, which means 0x08
-                asm volatile ("ud2");
+                return true;
             }
         }
     }
+    return false;
 }
+#define CHECK_RW_POISONED(ptr, n, msg, ...)                                 \
+    do                                                                      \
+    {                                                                       \
+        if (check_rw_poisoned((ptr), (n)))                                  \
+            error("invalid write detected for " msg, ##__VA_ARGS__);        \
+    }                                                                       \
+    while (false)
+static bool check_ro_poisoned(const void *ptr, size_t n)
+{
+    // Check the token of the destination
+    uintptr_t iptr = (uintptr_t)ptr;
+    if (iptr + n < REZZAN_BASE || iptr > REZZAN_BASE + REZZAN_MAX)
+        return false;
+    size_t front_delta = iptr % sizeof(Token);
+    int check_len = n + front_delta;
+    iptr -= front_delta;
+    size_t end_delta = check_len % sizeof(Token);
+    if (end_delta)
+        check_len += sizeof(Token);
+    check_len /= sizeof(Token);
+    Token *ptr64 = (Token *)iptr;
+    for (size_t i = 0; i < check_len; i++)
+    {
+        // Check the token of each memory
+        if (is_ro_poisoned(ptr64 + i))
+            return true;
+    }
+    return false;
+}
+#define CHECK_RO_POISONED(ptr, n, msg, ...)                                 \
+    do                                                                      \
+    {                                                                       \
+        if (check_ro_poisoned((ptr), (n)))                                  \
+            error("invalid read detected for " msg, ##__VA_ARGS__);         \
+    }                                                                       \
+    while (false)
 
 /*
  * Read a configuration value.
@@ -498,7 +568,7 @@ static void *pool_malloc(size_t size128)
 void *rezzan_malloc(size_t size)
 {
     // Check for initialization:
-    if (!option_enabled)
+    if (!option_enabled || size > REZZAN_MAX_ALLOC)
         return __libc_malloc(size);
 
     // Calculate the necessary sizes:
@@ -532,6 +602,11 @@ void *rezzan_malloc(size_t size)
     for (end64--; (uint8_t *)end64 >= end8; end64--)
         poison(end64, size);
 
+    // Poison the object for reads:
+    Token *ptr64 = (Token *)ptr;
+    for (size_t i = 0; i < size / sizeof(Token); i++)
+        poison_read(ptr64 + i);
+
     // Debugging:
     DEBUG("malloc(%zu) = %p [size128=%zu (%zu)]", size, ptr,
         size128, size128 * sizeof(Unit));
@@ -549,20 +624,20 @@ void *rezzan_malloc(size_t size)
             error("invalid object length detected; %p-%p < %zu"
                 "[ptr=%p, size=%zu]", end64, end8, sizeof(Token), ptr, size);
         Token *ptr64 = (Token *)ptr;
-        if (!is_poisoned(ptr64-1))
+        if (!is_rw_poisoned(ptr64-1))
             error("invalid object base detected [ptr=%p, size=%zu]", ptr, size);
         for (i = 0; i * sizeof(Token) < size; i++)
         {
-            if (is_poisoned(ptr64+i))
+            if (is_rw_poisoned(ptr64+i))
                 error("invalid object initialization detected [size=%zu]",
                     size);
         }
-        if (!is_poisoned(ptr64+i))
+        if (!is_rw_poisoned(ptr64+i))
             error("invalid redzone detected; missing token [size=%zu]", size);
         i++;
         size_t size64 = 2 * size128;
         for (; i < size64; i++)
-            if (!is_poisoned(ptr64+i))
+            if (!is_rw_poisoned(ptr64+i))
                 error("invalid redzone detected; missing extra token "
                     "[size=%zu]", size);
     }
@@ -594,17 +669,17 @@ void rezzan_free(void *ptr)
         __libc_free(ptr);
         return;
     }
-    if (is_poisoned(ptr))
+    if (is_rw_poisoned(ptr))
         error("bad or double-free detected with pointer %p; memory is "
             "already poisoned", ptr);
     Token *ptr64 = (Token *)ptr;
-    if (!is_poisoned(ptr64-1))
+    if (!is_rw_poisoned(ptr64-1))
         error("bad free detected with pointer %p; pointer does not "
             "point to the base of the object (corrupt malloc state?)", ptr64);
 
     // Poison the free'ed memory, and work out the object size.
     size_t i = 0;
-    for (; !is_poisoned(ptr64 + i); i++)
+    for (; !is_rw_poisoned(ptr64 + i); i++)
         poison(ptr64 + i, 0);
 }
 
@@ -630,7 +705,7 @@ void *rezzan_realloc(void *ptr, size_t size)
 
     size_t old_size64 = 0;
     Token *ptr64 = (Token *)ptr;
-    while (!is_poisoned(ptr64++))
+    while (!is_rw_poisoned(ptr64++))
         old_size64++;
     size_t old_size = old_size64 * sizeof(Token);
     size_t new_size = size;
@@ -657,16 +732,9 @@ void *rezzan_calloc(size_t nmemb, size_t size)
 {
     if (!option_enabled)
         return __libc_calloc(nmemb, size);
-
-    // ReZZan's malloc() already zero's memory.
     void *ptr = rezzan_malloc(nmemb * size);
-    if (ptr != NULL && option_checks)
-    {
-        uint8_t *ptr8 = (uint8_t *)ptr;
-        for (size_t i = 0; i < nmemb * size; i++)
-            if (ptr8[i] != 0x0)
-                error("invalid calloc allocation; byte %zu is non-zero", i);
-    }
+    if (ptr != NULL)
+        memset(ptr, 0x0, nmemb * size);
     return ptr;
 }
 
@@ -675,8 +743,8 @@ void *rezzan_calloc(size_t nmemb, size_t size)
  */
 void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 {
-    check_poisoned(dst, n);
-    check_poisoned(src, n);
+    CHECK_RW_POISONED(dst, n, "memcpy(%p,%p,%zu)", dst, src, n);
+    CHECK_RO_POISONED(src, n, "memcpy(%p,%p,%zu)", dst, src, n);
 
     uint8_t *dst8 = (uint8_t *)dst;
     const uint8_t *src8 = (const uint8_t *)src;
@@ -686,8 +754,8 @@ void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 }
 void *memmove(void * restrict dst, const void * restrict src, size_t n)
 {
-    check_poisoned(dst, n);
-    check_poisoned(src, n);
+    CHECK_RW_POISONED(dst, n, "memmove(%p,%p,%zu)", dst, src, n);
+    CHECK_RO_POISONED(src, n, "memmove(%p,%p,%zu)", dst, src, n);
 
     uint8_t *dst8 = (uint8_t *)dst;
     uint8_t *src8 = (uint8_t *)src;
@@ -707,7 +775,7 @@ void *memmove(void * restrict dst, const void * restrict src, size_t n)
 }
 void *memset(void *dst, int c, size_t n)
 {
-    check_poisoned(dst, n);
+    CHECK_RW_POISONED(dst, n, "memset(%p,%d,%zu)", dst, c, n);
 
     uint8_t *dst8 = (uint8_t *)dst;
     for (size_t i = 0; i < n; i++)
@@ -719,7 +787,7 @@ size_t strlen(const char *str)
     size_t n = 0;
     while (true)
     {
-        check_poisoned(str + n, 1);
+        CHECK_RO_POISONED(str + n, 1, "strlen(%p)", str);
         if (str[n] == '\0')
             return n;
         n++;
@@ -730,7 +798,7 @@ size_t strnlen(const char *str, size_t maxlen)
     size_t n = 0;
     while (n < maxlen)
     {
-        check_poisoned(str + n, 1);
+        CHECK_RO_POISONED(str + n, 1, "strnlen(%p,%zu)", str, maxlen);
         if (str[n] == '\0')
             return n;
         n++;
@@ -741,8 +809,9 @@ char *strcpy(char *dst, const char *src)
 {
     for (size_t i = 0; ; i++)
     {
-        check_poisoned(src + i, 1);
-        check_poisoned(dst + i, 1);
+        CHECK_RO_POISONED(src + i, 1, "strcpy(%p,%p)", dst, src);
+        CHECK_RW_POISONED(dst + i, 1, "strcpy(%p,%p)", dst, src);
+
         dst[i] = src[i];
         if (src[i] == '\0')
             break;
@@ -781,7 +850,7 @@ size_t __wcslen(const wchar_t *str)
     size_t n = 0;
     while (true)
     {
-        check_poisoned(str + n, 1);
+        CHECK_RO_POISONED(str + n, 1, "__wcslen(%p)", str);
         if (str[n] == L'\0')
             return n;
         n++;
@@ -791,8 +860,9 @@ wchar_t* wcscpy(wchar_t *dst, const wchar_t *src)
 {
     for (size_t i = 0; ; i++)
     {
-        check_poisoned(src + i, 1);
-        check_poisoned(dst + i, 1);
+        CHECK_RO_POISONED(src + i, 1, "wcscpy(%p,%p)", dst, src);
+        CHECK_RW_POISONED(dst + i, 1, "wcscpy(%p,%p)", dst, src);
+
         dst[i] = src[i];
         if (src[i] == '\0')
             break;
@@ -885,7 +955,7 @@ extern size_t malloc_usable_size(void *ptr)
 
     size_t size64 = 0;
     Token *ptr64 = (Token *)ptr;
-    while (!is_poisoned(ptr64++))
+    while (!is_rw_poisoned(ptr64++))
         size64++;
     return size64 * sizeof(Token);
 }
