@@ -165,17 +165,17 @@ extern int arch_prctl(int code, unsigned long *addr);
 /*
  * Low-level memory operations.
  */
-#define RZ_NONCE_ADDR   "%gs:0x08"      // Redzone nonce
-#define WO_NONCE_ADDR   "%gs:0x10"      // Write-only nonce
+#define RW_NONCE_ADDR   "%gs:0x08"      // Redzone nonce
+#define RD_NONCE_ADDR   "%gs:0x10"      // Write-only nonce
 
-#define get_rz_nonce(nonce)                                             \
-    asm volatile ("movq %" RZ_NONCE_ADDR ",%0" : "=r"(nonce))
-#define set_rz_nonce(nonce)                                             \
-    asm volatile ("movq %0,%" RZ_NONCE_ADDR : : "r"(nonce))
-#define get_wo_nonce(nonce)                                             \
-    asm volatile ("movq %" WO_NONCE_ADDR ",%0" : "=r"(nonce))
-#define set_wo_nonce(nonce)                                             \
-    asm volatile ("movq %0,%" WO_NONCE_ADDR : : "r"(nonce))
+#define get_rw_nonce(nonce)                                             \
+    asm volatile ("movq %" RW_NONCE_ADDR ",%0" : "=r"(nonce))
+#define set_rw_nonce(nonce)                                             \
+    asm volatile ("movq %0,%" RW_NONCE_ADDR : : "r"(nonce))
+#define get_rd_nonce(nonce)                                             \
+    asm volatile ("movq %" RD_NONCE_ADDR ",%0" : "=r"(nonce))
+#define set_rd_nonce(nonce)                                             \
+    asm volatile ("movq %0,%" RD_NONCE_ADDR : : "r"(nonce))
 #define check_nonce(nonce, val)                                         \
     asm volatile ("lea 1(%0,%1),%0" : "+r"(nonce) : "r"(val))
 #define negate_nonce(ptr)                                               \
@@ -184,14 +184,14 @@ extern int arch_prctl(int code, unsigned long *addr);
 static void rezzan_init_nonce61(void)
 {
     register uint64_t nonce;
-    get_rz_nonce(nonce);
+    get_rw_nonce(nonce);
     nonce &= ~0x7ull;
-    set_rz_nonce(nonce);
+    set_rw_nonce(nonce);
 }
 static inline void rezzan_poison_read(Token *ptr64)
 {
     register uint64_t nonce;
-    get_wo_nonce(nonce);
+    get_rd_nonce(nonce);
     ptr64->nonce = nonce;
     negate_nonce(ptr64);
 }
@@ -200,7 +200,7 @@ static inline void rezzan_poison_write61(Token *ptr64, size_t boundary)
     boundary = ~boundary;
     boundary &= 0x7ull;
     register uint64_t nonce;
-    get_rz_nonce(nonce);
+    get_rw_nonce(nonce);
     nonce |= boundary;
     ptr64->nonce = nonce;
     negate_nonce(ptr64);
@@ -208,14 +208,14 @@ static inline void rezzan_poison_write61(Token *ptr64, size_t boundary)
 static inline bool rezzan_check_write61(const Token *ptr64)
 {
     register uint64_t nonce;
-    get_rz_nonce(nonce);
+    get_rw_nonce(nonce);
     check_nonce(nonce, ptr64->nonce | 0x7ull);
     return (nonce == 0);
 }
 static inline bool rezzan_check_read61(const Token *ptr64)
 {
     register uint64_t nonce;
-    get_wo_nonce(nonce);
+    get_rd_nonce(nonce);
     check_nonce(nonce, ptr64->nonce);
     return rezzan_check_write61(ptr64) | (nonce == 0);
 }
@@ -226,28 +226,28 @@ static void rezzan_init_nonce64(void)
 static inline void rezzan_poison_write64(Token *ptr64)
 {
     register uint64_t nonce;
-    get_rz_nonce(nonce);
+    get_rw_nonce(nonce);
     ptr64->nonce = nonce;
     negate_nonce(ptr64);
 }
 static inline bool rezzan_check_write64(const Token *ptr64)
 {
     register uint64_t nonce;
-    get_rz_nonce(nonce);
+    get_rw_nonce(nonce);
     check_nonce(nonce, ptr64->nonce);
     return (nonce == 0);
 }
 static inline bool rezzan_check_read64(const Token *ptr64)
 {
     register uint64_t nonce;
-    get_wo_nonce(nonce);
+    get_rd_nonce(nonce);
     check_nonce(nonce, ptr64->nonce);
     return rezzan_check_write61(ptr64) | (nonce == 0);
 }
 static inline uint64_t rezzan_get_nonce(void)
 {
     register uint64_t nonce;
-    get_rz_nonce(nonce);
+    get_rw_nonce(nonce);
     return nonce;
 }
 
@@ -320,7 +320,7 @@ static bool is_rw_poisoned(Token *ptr64)
 /*
  * Test if the 64-bit aligned pointer `ptr64' is poisoned for reads or not.
  */
-static bool is_ro_poisoned(Token *ptr64)
+static bool is_rd_poisoned(Token *ptr64)
 {
     switch (nonce_size)
     {
@@ -380,7 +380,7 @@ static bool check_rw_poisoned(const void *ptr, size_t n)
             error("invalid write detected for " msg, ##__VA_ARGS__);        \
     }                                                                       \
     while (false)
-static bool check_ro_poisoned(const void *ptr, size_t n)
+static bool check_rd_poisoned(const void *ptr, size_t n)
 {
     // Check the token of the destination
     uintptr_t iptr = (uintptr_t)ptr;
@@ -397,15 +397,15 @@ static bool check_ro_poisoned(const void *ptr, size_t n)
     for (size_t i = 0; i < check_len; i++)
     {
         // Check the token of each memory
-        if (is_ro_poisoned(ptr64 + i))
+        if (is_rd_poisoned(ptr64 + i))
             return true;
     }
     return false;
 }
-#define CHECK_RO_POISONED(ptr, n, msg, ...)                                 \
+#define CHECK_RD_POISONED(ptr, n, msg, ...)                                 \
     do                                                                      \
     {                                                                       \
-        if (check_ro_poisoned((ptr), (n)))                                  \
+        if (check_rd_poisoned((ptr), (n)))                                  \
             error("invalid read detected for " msg, ##__VA_ARGS__);         \
     }                                                                       \
     while (false)
@@ -744,7 +744,7 @@ void *rezzan_calloc(size_t nmemb, size_t size)
 void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 {
     CHECK_RW_POISONED(dst, n, "memcpy(%p,%p,%zu)", dst, src, n);
-    CHECK_RO_POISONED(src, n, "memcpy(%p,%p,%zu)", dst, src, n);
+    CHECK_RD_POISONED(src, n, "memcpy(%p,%p,%zu)", dst, src, n);
 
     uint8_t *dst8 = (uint8_t *)dst;
     const uint8_t *src8 = (const uint8_t *)src;
@@ -755,7 +755,7 @@ void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 void *memmove(void * restrict dst, const void * restrict src, size_t n)
 {
     CHECK_RW_POISONED(dst, n, "memmove(%p,%p,%zu)", dst, src, n);
-    CHECK_RO_POISONED(src, n, "memmove(%p,%p,%zu)", dst, src, n);
+    CHECK_RD_POISONED(src, n, "memmove(%p,%p,%zu)", dst, src, n);
 
     uint8_t *dst8 = (uint8_t *)dst;
     uint8_t *src8 = (uint8_t *)src;
@@ -787,7 +787,7 @@ size_t strlen(const char *str)
     size_t n = 0;
     while (true)
     {
-        CHECK_RO_POISONED(str + n, 1, "strlen(%p)", str);
+        CHECK_RD_POISONED(str + n, 1, "strlen(%p)", str);
         if (str[n] == '\0')
             return n;
         n++;
@@ -798,7 +798,7 @@ size_t strnlen(const char *str, size_t maxlen)
     size_t n = 0;
     while (n < maxlen)
     {
-        CHECK_RO_POISONED(str + n, 1, "strnlen(%p,%zu)", str, maxlen);
+        CHECK_RD_POISONED(str + n, 1, "strnlen(%p,%zu)", str, maxlen);
         if (str[n] == '\0')
             return n;
         n++;
@@ -809,7 +809,7 @@ char *strcpy(char *dst, const char *src)
 {
     for (size_t i = 0; ; i++)
     {
-        CHECK_RO_POISONED(src + i, 1, "strcpy(%p,%p)", dst, src);
+        CHECK_RD_POISONED(src + i, 1, "strcpy(%p,%p)", dst, src);
         CHECK_RW_POISONED(dst + i, 1, "strcpy(%p,%p)", dst, src);
 
         dst[i] = src[i];
@@ -850,7 +850,7 @@ size_t __wcslen(const wchar_t *str)
     size_t n = 0;
     while (true)
     {
-        CHECK_RO_POISONED(str + n, 1, "__wcslen(%p)", str);
+        CHECK_RD_POISONED(str + n, 1, "__wcslen(%p)", str);
         if (str[n] == L'\0')
             return n;
         n++;
@@ -860,7 +860,7 @@ wchar_t* wcscpy(wchar_t *dst, const wchar_t *src)
 {
     for (size_t i = 0; ; i++)
     {
-        CHECK_RO_POISONED(src + i, 1, "wcscpy(%p,%p)", dst, src);
+        CHECK_RD_POISONED(src + i, 1, "wcscpy(%p,%p)", dst, src);
         CHECK_RW_POISONED(dst + i, 1, "wcscpy(%p,%p)", dst, src);
 
         dst[i] = src[i];

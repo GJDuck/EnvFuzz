@@ -8,5 +8,5 @@ rrCovPlugin.so: rrCovPlugin.cpp
 	$(CXX) $(CXXFLAGS) -I . -fPIC -shared -o rrCovPlugin.so rrCovPlugin.cpp
 
 rezzan: rezzan.c
-	$(CC) -Wall -Wno-unused-function -Og -g -fPIC -shared -o rezzan.so rezzan.c
+	$(CC) -Wall -Wno-unused-function -fno-builtin -Og -g -fPIC -shared -o rezzan.so rezzan.c
 
