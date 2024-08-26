@@ -244,10 +244,16 @@ static inline bool rezzan_check_read64(const Token *ptr64)
     check_nonce(nonce, ptr64->nonce);
     return rezzan_check_write61(ptr64) | (nonce == 0);
 }
-static inline uint64_t rezzan_get_nonce(void)
+uint64_t rezzan_get_rw_nonce(void)
 {
     register uint64_t nonce;
     get_rw_nonce(nonce);
+    return nonce;
+}
+uint64_t rezzan_get_rd_nonce(void)
+{
+    register uint64_t nonce;
+    get_rd_nonce(nonce);
     return nonce;
 }
 
@@ -267,7 +273,7 @@ static void *rezzan_mmap(void *addr, size_t len, int prot, int flags,
 /*
  * Poison the 64-bit aligned pointer `ptr64'.
  */
-static void poison(Token *ptr64, size_t size)
+static void rw_poison(Token *ptr64, size_t size)
 {
     switch (nonce_size)
     {
@@ -288,7 +294,7 @@ static void poison(Token *ptr64, size_t size)
 /*
  * Poison the 64-bit aligned pointer `ptr64' for reading.
  */
-static void poison_read(Token *ptr64)
+static void rd_poison(Token *ptr64)
 {
     rezzan_poison_read(ptr64);
 }
@@ -498,8 +504,8 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
     pool_mmap  = POOL_MMAP_SIZE;
 
     // Poison the first unit so underflows will be detected:
-    poison(&pool->t[0], 0);
-    poison(&pool->t[1], 0);
+    rw_poison(&pool->t[0], 0);
+    rw_poison(&pool->t[1], 0);
     pool_ptr++;
 
     option_inited = true;
@@ -595,17 +601,17 @@ void *rezzan_malloc(size_t size)
     // Make sure the last word is poisoned *before* releasing the lock:
     Token *end64 = (Token *)((uint8_t *)ptr + size128 * sizeof(Unit));
     end64--;
-    poison(end64, size);
+    rw_poison(end64, size);
 
     // Poison the rest of the redzone:
     uint8_t *end8 = (uint8_t *)ptr + size;
     for (end64--; (uint8_t *)end64 >= end8; end64--)
-        poison(end64, size);
+        rw_poison(end64, size);
 
     // Poison the object for reads:
     Token *ptr64 = (Token *)ptr;
     for (size_t i = 0; i < size / sizeof(Token); i++)
-        poison_read(ptr64 + i);
+        rd_poison(ptr64 + i);
 
     // Debugging:
     DEBUG("malloc(%zu) = %p [size128=%zu (%zu)]", size, ptr,
@@ -680,7 +686,7 @@ void rezzan_free(void *ptr)
     // Poison the free'ed memory, and work out the object size.
     size_t i = 0;
     for (; !is_rw_poisoned(ptr64 + i); i++)
-        poison(ptr64 + i, 0);
+        rw_poison(ptr64 + i, 0);
 }
 
 /*
@@ -744,7 +750,8 @@ void *rezzan_calloc(size_t nmemb, size_t size)
 void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 {
     CHECK_RW_POISONED(dst, n, "memcpy(%p,%p,%zu)", dst, src, n);
-    CHECK_RD_POISONED(src, n, "memcpy(%p,%p,%zu)", dst, src, n);
+//    CHECK_RD_POISONED(src, n, "memcpy(%p,%p,%zu)", dst, src, n);
+    CHECK_RW_POISONED(dst, n, "memcpy(%p,%p,%zu)", dst, src, n);
 
     uint8_t *dst8 = (uint8_t *)dst;
     const uint8_t *src8 = (const uint8_t *)src;
@@ -755,7 +762,8 @@ void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 void *memmove(void * restrict dst, const void * restrict src, size_t n)
 {
     CHECK_RW_POISONED(dst, n, "memmove(%p,%p,%zu)", dst, src, n);
-    CHECK_RD_POISONED(src, n, "memmove(%p,%p,%zu)", dst, src, n);
+//    CHECK_RD_POISONED(src, n, "memmove(%p,%p,%zu)", dst, src, n);
+    CHECK_RW_POISONED(dst, n, "memmove(%p,%p,%zu)", dst, src, n);
 
     uint8_t *dst8 = (uint8_t *)dst;
     uint8_t *src8 = (uint8_t *)src;
