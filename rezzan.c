@@ -35,6 +35,8 @@
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <elf.h>
+#include <link.h>
 
 #include <errno.h>
 #include <pthread.h>
@@ -151,14 +153,75 @@ static size_t pool_mmap = 0;
 #define POOL_MMAP_SIZE          (((size_t)(1ull << 15)) / sizeof(Unit))
 
 /*
- * Glibc memory functions.
+ * Libc functions.
  */
-extern void *__libc_malloc(size_t size);
-extern void __libc_free(void *ptr);
-extern void *__libc_realloc(void *ptr, size_t size);
-extern void *__libc_calloc(size_t nmemb, size_t size);
-extern int __vsnprintf (char *string, size_t maxlen, const char *format,
-                      va_list args, unsigned int mode_flags);
+static __attribute__((__aligned__(4096))) void *libc_funcs[512] = {NULL};
+
+enum
+{
+    MEMSET_IDX,
+    MEMMOVE_IDX,
+    MEMCMP_IDX,
+    MEMCHR_IDX,
+    MEMRCHR_IDX,
+    STRNLEN_IDX,
+    STRNCMP_IDX,
+    STRNCASECMP_IDX,
+    STRRCHR_IDX,
+    MALLOC_IDX,
+    REALLOC_IDX,
+    FREE_IDX,
+    MALLOC_USABLE_SIZE_IDX,
+    THROW_BAD_ALLOC_IDX,
+};
+
+static const char * const libc_names[] =
+{
+    [MEMSET_IDX]             = "memset",
+    [MEMMOVE_IDX]            = "memmove",
+    [MEMCMP_IDX]             = "memcmp",
+    [MEMCHR_IDX]             = "memchr",
+    [MEMRCHR_IDX]            = "memrchr",
+    [STRNLEN_IDX]            = "strnlen",
+    [STRNCMP_IDX]            = "strncmp",
+    [STRNCASECMP_IDX]        = "strncasecmp",
+    [STRRCHR_IDX]            = "strrchr",
+    [MALLOC_IDX]             = "malloc",
+    [REALLOC_IDX]            = "realloc",
+    [FREE_IDX]               = "free",
+    [MALLOC_USABLE_SIZE_IDX] = "malloc_usable_size",
+//    [THROW_BAD_ALLOC_IDX]    = "_ZSt17__throw_bad_allocv",
+};
+
+typedef void *(*memset_t)(void *, int, size_t);
+typedef void *(*memcpy_t)(void *, const void *, size_t);
+typedef int (*memcmp_t)(const void *, const void *, size_t);
+typedef void *(*memchr_t)(const void *, int, size_t);
+typedef size_t (*strnlen_t)(const char *, size_t);
+typedef int (*strncmp_t)(const char *, const char *, size_t);
+typedef char *(*strchr_t)(const char *, int);
+typedef size_t (*malloc_usable_size_t)(void *);
+typedef void *(*malloc_t)(size_t);
+typedef void *(*realloc_t)(void *, size_t);
+typedef void (*free_t)(void *);
+// typedef void (*throw_t)(void);
+
+#define libc_memset         ((memset_t)libc_funcs[MEMSET_IDX])
+#define libc_memmove        ((memcpy_t)libc_funcs[MEMMOVE_IDX])
+#define libc_memcmp         ((memcmp_t)libc_funcs[MEMCMP_IDX])
+#define libc_memchr         ((memchr_t)libc_funcs[MEMCHR_IDX])
+#define libc_memrchr        ((memchr_t)libc_funcs[MEMRCHR_IDX])
+#define libc_strnlen        ((strnlen_t)libc_funcs[STRNLEN_IDX])
+#define libc_strncmp        ((strncmp_t)libc_funcs[STRNCMP_IDX])
+#define libc_strncasecmp    ((strncmp_t)libc_funcs[STRNCASECMP_IDX])
+#define libc_strrchr        ((strchr_t)libc_funcs[STRRCHR_IDX])
+#define libc_malloc         ((malloc_t)libc_funcs[MALLOC_IDX])
+#define libc_realloc        ((realloc_t)libc_funcs[REALLOC_IDX])
+#define libc_free           ((free_t)libc_funcs[FREE_IDX])
+#define libc_malloc_usable_size                                         \
+    ((malloc_usable_size_t)libc_funcs[MALLOC_USABLE_SIZE_IDX])
+// #define libcpp_throw_bad_alloc                                          \
+//     ((throw_t)libc_funcs[THROW_BAD_ALLOC_IDX])
 
 extern int arch_prctl(int code, unsigned long *addr);
 
@@ -415,6 +478,31 @@ static bool check_rd_poisoned(const void *ptr, size_t n)
             error("invalid read detected for " msg, ##__VA_ARGS__);         \
     }                                                                       \
     while (false)
+static bool check_str_poisoned(const char *str, size_t n)
+{
+    uintptr_t iptr = (uintptr_t)str;
+    if (n == 0 || iptr < REZZAN_BASE || iptr > REZZAN_BASE + REZZAN_MAX)
+        return false;
+    uintptr_t iptr_0 = iptr - iptr % sizeof(Token);
+    if (iptr_0 < iptr && is_rd_poisoned((Token *)iptr_0))
+        return true;
+    for (size_t i = 0; i < n; i++)
+    {
+        uintptr_t iptr = (uintptr_t)str + i;
+        if (iptr % sizeof(Token) == 0 && is_rd_poisoned((Token *)iptr))
+            return true;
+        if (str[i] == '\0')
+            return false;
+    }
+    return false;
+}
+#define CHECK_STR_POISONED(str, n, msg, ...)                                \
+    do                                                                      \
+    {                                                                       \
+        if (check_str_poisoned((str), (n)))                                 \
+            error("invalid read detected for " msg, ##__VA_ARGS__);         \
+    }                                                                       \
+    while (false)
 
 /*
  * Read a configuration value.
@@ -438,16 +526,31 @@ static size_t get_config(const char *name, size_t _default)
 /*
  * ReZZan initialization.
  */
+static void libc_init(void);
+static intptr_t callback(int cmd, ...)
+{
+    return 0;
+}
 void REZZAN_CONSTRUCTOR rezzan_init(void)
 {
     if (option_inited)
         return;
 
     option_tty = isatty(STDERR_FILENO);
-    unsigned long gs;
-    rr_disable();
-    if (arch_prctl(ARCH_GET_GS, &gs) < 0 || gs == 0x0)
-        error("this version of ReZZan is only compatiable with env-fuzz");
+    uintptr_t gs;
+    (void)syscall(SYS_disable);     // rr_disable();
+    if (arch_prctl(ARCH_GET_GS, &gs) < 0)
+        error("failed to read %%gs register: %s", strerror(errno));
+    if (gs == 0x0)
+    {
+        static struct INTERFACE I = {0};
+        if (syscall(SYS_getrandom, I.nonce, sizeof(I.nonce), 0) <
+                sizeof(I.nonce))
+            error("failed to generate random nonce: %s", strerror(errno));
+        I.callback = callback;
+        if (arch_prctl(ARCH_SET_GS, (void *)&I) < 0)
+            error("failed to set %%gs register: %s", strerror(errno));
+    }
     rr_enable();
 
     option_stats   = (bool)get_config("REZZAN_STATS", 0);
@@ -507,6 +610,8 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
     rw_poison(&pool->t[0], 0);
     rw_poison(&pool->t[1], 0);
     pool_ptr++;
+
+    libc_init();
 
     option_inited = true;
 }
@@ -575,7 +680,7 @@ void *rezzan_malloc(size_t size)
 {
     // Check for initialization:
     if (!option_enabled || size > REZZAN_MAX_ALLOC)
-        return __libc_malloc(size);
+        return libc_malloc(size);
 
     // Calculate the necessary sizes:
     if (size == 0)
@@ -660,7 +765,7 @@ void rezzan_free(void *ptr)
         return;
     if (!option_enabled)
     {
-        __libc_free(ptr);
+        libc_free(ptr);
         return;
     }
 
@@ -672,7 +777,7 @@ void rezzan_free(void *ptr)
     if (ptr128 < pool || ptr128 >= pool + pool_size)
     {
         // Not allocated by us...
-        __libc_free(ptr);
+        libc_free(ptr);
         return;
     }
     if (is_rw_poisoned(ptr))
@@ -695,7 +800,7 @@ void rezzan_free(void *ptr)
 void *rezzan_realloc(void *ptr, size_t size)
 {
     if (!option_enabled)
-        return __libc_realloc(ptr, size);
+        return libc_realloc(ptr, size);
 
     if (ptr == NULL)
         return malloc(size);
@@ -706,7 +811,7 @@ void *rezzan_realloc(void *ptr, size_t size)
     if (ptr128 < pool || ptr128 >= pool + pool_size)
     {
         // Not allocated by us...
-        return __libc_realloc(ptr, size);
+        return libc_realloc(ptr, size);
     }
 
     size_t old_size64 = 0;
@@ -721,7 +826,7 @@ void *rezzan_realloc(void *ptr, size_t size)
     if (new_ptr == NULL)
         return new_ptr;
     // Debugging:
-    DEBUG("realloc(old:%p, size:%zu) = %p", old_ptr,
+    DEBUG("realloc(%p,%zu) = %p", old_ptr,
         copy_size, new_ptr);
     uint8_t *dst8 = (uint8_t *)new_ptr;
     uint8_t *src8 = (uint8_t *)old_ptr;
@@ -737,11 +842,155 @@ void *rezzan_realloc(void *ptr, size_t size)
 void *rezzan_calloc(size_t nmemb, size_t size)
 {
     if (!option_enabled)
-        return __libc_calloc(nmemb, size);
+        return libc_calloc(nmemb, size);
     void *ptr = rezzan_malloc(nmemb * size);
     if (ptr != NULL)
-        memset(ptr, 0x0, nmemb * size);
+        libc_memset(ptr, 0x0, nmemb * size);
     return ptr;
+}
+
+/*
+ * Lookup a symbol.
+ */
+static const Elf64_Sym *lookup_sym(const void *hshtab_0,
+    const Elf64_Sym *symtab, const char *strtab, const char *name)
+{
+    struct hshtab_s
+    {
+        uint32_t nbuckets;
+        uint32_t symoffset;
+        uint32_t bloomsz;
+        uint32_t bloomshft;
+        uint8_t data[];
+    };
+
+    uint32_t h = 5381;
+    for (int i = 0; name[i]; i++)
+        h = (h << 5) + h + name[i];
+
+    const struct hshtab_s *hshtab =
+        (const struct hshtab_s *)hshtab_0;
+
+    const uint32_t *buckets =
+        (const uint32_t *)(hshtab->data + hshtab->bloomsz * sizeof(uint64_t));
+    const uint32_t *chain = buckets + hshtab->nbuckets;
+
+    uint32_t idx = buckets[h % hshtab->nbuckets];
+    if (idx < hshtab->symoffset)
+        return NULL;
+    for (; ; idx++)
+    {
+        const char* entry = strtab + symtab[idx].st_name;
+        const uint32_t hh = chain[idx - hshtab->symoffset];
+        if ((hh | 0x1) == (h | 0x1))
+        {
+            bool match = true;
+            for (size_t i = 0; match; i++)
+            {
+                match = (name[i] == entry[i]);
+                if (name[i] == '\0')
+                    break;
+            }
+            if (match)
+                return symtab + idx;
+        }
+        if ((hh & 0x1) != 0)
+            return NULL;
+    }
+}
+
+/*
+ * Lookup a symbol address.
+ */
+static void *lookup_sym_addr(struct link_map *l, const void *hshtab,
+    const Elf64_Sym *symtab, const char *strtab, const char *name)
+{
+    const Elf64_Sym *sym = lookup_sym(hshtab, symtab, strtab, name);
+    if (sym == NULL)
+        return NULL;
+    void *addr = (void *)(l->l_addr + sym->st_value);
+    switch (ELF64_ST_TYPE(sym->st_info))
+    {
+        case STT_FUNC:
+            break;
+        case STT_GNU_IFUNC:
+            addr = ((void *(*)(void))addr)();
+            break;
+        default:
+            error("unknown type for symbol \"%s\"", name);
+    }
+    return addr;
+}
+
+/*
+ * Initialize the libc functions.
+ *  
+ * NOTE: We do not use dlsym() since it seems to break under this use-case.
+ *       The problem is that dlsym() itself will call intercepted libc
+ *       functions, like memset, resulting in a circular dependency.
+ *       To solve this, we effectively re-implement a specialized dlsym().
+ */     
+static void libc_init(void)
+{
+    struct r_debug *debug = &_r_debug;
+    struct link_map *link_map = debug->r_map;
+    struct link_map *l      = NULL;
+    const void *hshtab      = NULL;
+    const Elf64_Sym *symtab = NULL;
+    const char *strtab      = NULL;
+    for (l = link_map; l != NULL; l = l->l_next)
+    {
+        const Elf64_Dyn *dynamic = l->l_ld;
+        if (dynamic == NULL || dynamic == _DYNAMIC)
+            continue;
+        hshtab = NULL;
+        symtab = NULL;
+        strtab = NULL;
+        for (size_t i = 0; dynamic[i].d_tag != DT_NULL; i++)
+        {
+            switch (dynamic[i].d_tag)
+            {
+                case DT_STRTAB:
+                    strtab = (const char *)dynamic[i].d_un.d_ptr;
+                    break;
+                case DT_SYMTAB:
+                    symtab = (const Elf64_Sym *)dynamic[i].d_un.d_ptr;
+                    break;
+                case DT_GNU_HASH:
+                    hshtab = (const void *)dynamic[i].d_un.d_ptr;
+                    break;
+                default:
+                    continue;
+            }
+        }
+        if (hshtab == NULL || symtab == NULL || strtab == NULL)
+            continue;
+        if ((intptr_t)hshtab <= UINT32_MAX || (intptr_t)symtab <= UINT32_MAX ||
+                (intptr_t)strtab <= UINT32_MAX)
+            continue;
+        if (lookup_sym(hshtab, symtab, strtab, "malloc") != NULL)
+        {
+            for (size_t i = 0;
+                i < sizeof(libc_names) / sizeof(libc_names[0]);
+                i++)
+            {
+                if (libc_funcs[i] != NULL)
+                    continue;
+                libc_funcs[i] = lookup_sym_addr(l, hshtab,
+                    symtab, strtab, libc_names[i]);
+            }
+        }
+    }
+    for (size_t i = 0;
+            i < sizeof(libc_names) / sizeof(libc_names[0]); i++)
+    {
+        if (libc_funcs[i] == NULL)
+            error("failed to find libc function \"%s\"",
+                libc_names[i]);
+    }
+
+    if (mprotect(libc_funcs, sizeof(libc_funcs), PROT_READ) != 0)
+        error("failed to protect libc function table");
 }
 
 /*
@@ -749,132 +998,79 @@ void *rezzan_calloc(size_t nmemb, size_t size)
  */
 void *memcpy(void * restrict dst, const void * restrict src, size_t n)
 {
+    // Note: src can be uninitialized
     CHECK_RW_POISONED(dst, n, "memcpy(%p,%p,%zu)", dst, src, n);
-//    CHECK_RD_POISONED(src, n, "memcpy(%p,%p,%zu)", dst, src, n);
     CHECK_RW_POISONED(dst, n, "memcpy(%p,%p,%zu)", dst, src, n);
-
-    uint8_t *dst8 = (uint8_t *)dst;
-    const uint8_t *src8 = (const uint8_t *)src;
-    for (size_t i = 0; i < n; i++)
-        dst8[i] = src8[i];
-    return dst;
+    DEBUG("memcpy(%p,%p,%zu) = %p", dst, src, n, dst);
+    return libc_memmove(dst, src, n);
 }
-void *memmove(void * restrict dst, const void * restrict src, size_t n)
+void *memmove(void *dst, const void *src, size_t n)
 {
+    // Note: src can be uninitialized
     CHECK_RW_POISONED(dst, n, "memmove(%p,%p,%zu)", dst, src, n);
-//    CHECK_RD_POISONED(src, n, "memmove(%p,%p,%zu)", dst, src, n);
     CHECK_RW_POISONED(dst, n, "memmove(%p,%p,%zu)", dst, src, n);
-
-    uint8_t *dst8 = (uint8_t *)dst;
-    uint8_t *src8 = (uint8_t *)src;
-    if (dst8 < src8)
-    {
-        while (n--)
-            *dst8++ = *src8++;
-    }
-    else
-    {
-        uint8_t *lasts = src8 + (n-1);
-        uint8_t *lastd = dst8 + (n-1);
-        while (n--)
-            *lastd-- = *lasts--;
-    }
-    return dst;
+    DEBUG("memmove(%p,%p,%zu) = %p", dst, src, n, dst);
+    return libc_memmove(dst, src, n);
 }
 void *memset(void *dst, int c, size_t n)
 {
     CHECK_RW_POISONED(dst, n, "memset(%p,%d,%zu)", dst, c, n);
-
-    uint8_t *dst8 = (uint8_t *)dst;
-    for (size_t i = 0; i < n; i++)
-        dst8[i] = (uint8_t)(int8_t)c;
-    return dst;
+    DEBUG("memset(%p,%d,%zu) = %p", dst, c, n, dst);
+    return libc_memset(dst, c, n);
 }
 size_t strlen(const char *str)
 {
-    size_t n = 0;
-    while (true)
-    {
-        CHECK_RD_POISONED(str + n, 1, "strlen(%p)", str);
-        if (str[n] == '\0')
-            return n;
-        n++;
-    }
+    CHECK_STR_POISONED(str, SIZE_MAX, "strlen(%p)", str);
+    size_t n = libc_strnlen(str, SIZE_MAX);
+    DEBUG("strlen(%p) = %zu", str, n);
+    return n;
 }
 size_t strnlen(const char *str, size_t maxlen)
 {
-    size_t n = 0;
-    while (n < maxlen)
-    {
-        CHECK_RD_POISONED(str + n, 1, "strnlen(%p,%zu)", str, maxlen);
-        if (str[n] == '\0')
-            return n;
-        n++;
-    }
-    return maxlen;
+    CHECK_STR_POISONED(str, maxlen, "strnlen(%p,%zu)", str, maxlen);
+    size_t n = libc_strnlen(str, maxlen);
+    DEBUG("strnlen(%p,%zu) = %zu", str, maxlen, n);
+    return n;
 }
 char *strcpy(char *dst, const char *src)
 {
-    for (size_t i = 0; ; i++)
-    {
-        CHECK_RD_POISONED(src + i, 1, "strcpy(%p,%p)", dst, src);
-        CHECK_RW_POISONED(dst + i, 1, "strcpy(%p,%p)", dst, src);
-
-        dst[i] = src[i];
-        if (src[i] == '\0')
-            break;
-    }
+    CHECK_STR_POISONED(src, SIZE_MAX, "strcpy(%p,%p)", dst, src);
+    size_t n = libc_strnlen(src, SIZE_MAX);
+    CHECK_RW_POISONED(dst, n+1, "strcpy(%p,%p)", dst, src);
+    DEBUG("strcpy(%p,%p) = %p\n", dst, src, dst);
+    libc_memmove(dst, src, n+1);
     return dst;
 }
 char *strcat(char *dst, const char *src)
 {
-    strcpy(dst + strlen(dst), src);
+    CHECK_STR_POISONED(dst, SIZE_MAX, "strcat(%p,%p)", dst, src);
+    size_t n = libc_strnlen(dst, SIZE_MAX);
+    CHECK_STR_POISONED(src, SIZE_MAX, "strcat(%p,%p)", dst, src);
+    size_t m = libc_strnlen(src, SIZE_MAX);
+    CHECK_RW_POISONED(dst+n, m+1, "strcat(%p,%p)", dst, src);
+    DEBUG("strcat(%p,%p) = %p", dst, src, dst);
+    libc_memmove(dst+n, src, m+1);
     return dst;
 }
-char* strncpy(char *dst, const char *src, size_t n)
+char *strncpy(char *dst, const char *src, size_t n)
 {
-    size_t len = strnlen(src, n);
-    if (len != n)
-        memset(dst + len, '\0', n - len);
-    return memcpy(dst, src, len + 1);
+    CHECK_STR_POISONED(src, n, "strncpy(%p,%p,%zu)", dst, src, n);
+    size_t m = libc_strnlen(src, n);
+    CHECK_RW_POISONED(dst, n, "strncpy(%p,%p,%zu)", dst, src, n);
+    DEBUG("strncpy(%p,%p,%zu) = %zu", dst, src, n, dst);
+    libc_memmove(dst, src, m);
+    libc_memset(dst + m, '\0', n - m);
+    return dst;
 }
-char* strncat(char *s1, const char *s2, size_t n)
+char *strncat(char *dst, const char *src, size_t n)
 {
-    char *s = s1;
-    /* Find the end of S1.  */
-    s1 += strlen(s1);
-    size_t ss = strnlen(s2, n);
-    s1[ss] = '\0';
-    memcpy(s1, s2, ss);
-    return s;
-}
-wchar_t *__wmemcpy(wchar_t *dst, const wchar_t *src, size_t n)
-{
-    return (wchar_t *)memcpy((void *)dst, (const void *)src,
-        n * sizeof(wchar_t));
-}
-size_t __wcslen(const wchar_t *str)
-{
-    size_t n = 0;
-    while (true)
-    {
-        CHECK_RD_POISONED(str + n, 1, "__wcslen(%p)", str);
-        if (str[n] == L'\0')
-            return n;
-        n++;
-    }
-}
-wchar_t* wcscpy(wchar_t *dst, const wchar_t *src)
-{
-    for (size_t i = 0; ; i++)
-    {
-        CHECK_RD_POISONED(src + i, 1, "wcscpy(%p,%p)", dst, src);
-        CHECK_RW_POISONED(dst + i, 1, "wcscpy(%p,%p)", dst, src);
-
-        dst[i] = src[i];
-        if (src[i] == '\0')
-            break;
-    }
+    CHECK_STR_POISONED(dst, SIZE_MAX, "strncat(%p,%p,%zu)", dst, src, n);
+    size_t m = libc_strnlen(dst, SIZE_MAX);
+    CHECK_STR_POISONED(src, n, "strncat(%p,%p,%zu)", dst, src, n);
+    size_t l = libc_strnlen(src, n);
+    CHECK_RW_POISONED(dst+m, l+1, "strncat(%p,%p,%zu)", dst, src, n);
+    libc_memmove(dst+n, src, l);
+    dst[n+l] = '\0';
     return dst;
 }
 
@@ -943,23 +1139,11 @@ extern void *_ZnamRKSt9nothrow_t(size_t size) REZZAN_ALIAS("rezzan_malloc");
 extern void _ZdlPv(void *ptr) REZZAN_ALIAS("rezzan_free");
 extern void _ZdaPv(void *ptr) REZZAN_ALIAS("rezzan_free");
 
-typedef size_t (*malloc_usable_size_t)(void *);
 extern size_t malloc_usable_size(void *ptr)
 {
     Unit *ptr128 = (Unit *)ptr;
     if (ptr128 < pool || ptr128 >= pool + pool_size)
-    {
-        // Not allocated by us...
-        static malloc_usable_size_t libc_malloc_usable_size = NULL;
-        if (libc_malloc_usable_size == NULL)
-        {
-            libc_malloc_usable_size =
-                (malloc_usable_size_t)dlsym(RTLD_NEXT, "malloc_usable_size");
-            if (libc_malloc_usable_size == NULL)
-                error("failed to find libc malloc_usable_size()");
-        }
         return libc_malloc_usable_size(ptr);
-    }
 
     size_t size64 = 0;
     Token *ptr64 = (Token *)ptr;
