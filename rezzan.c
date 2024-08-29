@@ -170,6 +170,7 @@ enum
     STRRCHR_IDX,
     MALLOC_IDX,
     REALLOC_IDX,
+    CALLOC_IDX,
     FREE_IDX,
     MALLOC_USABLE_SIZE_IDX,
     THROW_BAD_ALLOC_IDX,
@@ -188,6 +189,7 @@ static const char * const libc_names[] =
     [STRRCHR_IDX]            = "strrchr",
     [MALLOC_IDX]             = "malloc",
     [REALLOC_IDX]            = "realloc",
+    [CALLOC_IDX]             = "calloc",
     [FREE_IDX]               = "free",
     [MALLOC_USABLE_SIZE_IDX] = "malloc_usable_size",
 //    [THROW_BAD_ALLOC_IDX]    = "_ZSt17__throw_bad_allocv",
@@ -203,25 +205,37 @@ typedef char *(*strchr_t)(const char *, int);
 typedef size_t (*malloc_usable_size_t)(void *);
 typedef void *(*malloc_t)(size_t);
 typedef void *(*realloc_t)(void *, size_t);
+typedef void *(*calloc_t)(size_t, size_t);
 typedef void (*free_t)(void *);
 // typedef void (*throw_t)(void);
 
-#define libc_memset         ((memset_t)libc_funcs[MEMSET_IDX])
-#define libc_memmove        ((memcpy_t)libc_funcs[MEMMOVE_IDX])
-#define libc_memcmp         ((memcmp_t)libc_funcs[MEMCMP_IDX])
-#define libc_memchr         ((memchr_t)libc_funcs[MEMCHR_IDX])
-#define libc_memrchr        ((memchr_t)libc_funcs[MEMRCHR_IDX])
-#define libc_strnlen        ((strnlen_t)libc_funcs[STRNLEN_IDX])
-#define libc_strncmp        ((strncmp_t)libc_funcs[STRNCMP_IDX])
-#define libc_strncasecmp    ((strncmp_t)libc_funcs[STRNCASECMP_IDX])
-#define libc_strrchr        ((strchr_t)libc_funcs[STRRCHR_IDX])
-#define libc_malloc         ((malloc_t)libc_funcs[MALLOC_IDX])
-#define libc_realloc        ((realloc_t)libc_funcs[REALLOC_IDX])
-#define libc_free           ((free_t)libc_funcs[FREE_IDX])
+static void libc_init(void);
+static void *libc_getfunc(int idx)
+{
+    if (libc_funcs[idx] == NULL)
+        libc_init();
+    if (libc_funcs[idx] == NULL)
+        abort();
+    return libc_funcs[idx];
+}
+
+#define libc_memset         ((memset_t)libc_getfunc(MEMSET_IDX))
+#define libc_memmove        ((memcpy_t)libc_getfunc(MEMMOVE_IDX))
+#define libc_memcmp         ((memcmp_t)libc_getfunc(MEMCMP_IDX))
+#define libc_memchr         ((memchr_t)libc_getfunc(MEMCHR_IDX))
+#define libc_memrchr        ((memchr_t)libc_getfunc(MEMRCHR_IDX))
+#define libc_strnlen        ((strnlen_t)libc_getfunc(STRNLEN_IDX))
+#define libc_strncmp        ((strncmp_t)libc_getfunc(STRNCMP_IDX))
+#define libc_strncasecmp    ((strncmp_t)libc_getfunc(STRNCASECMP_IDX))
+#define libc_strrchr        ((strchr_t)libc_getfunc(STRRCHR_IDX))
+#define libc_malloc         ((malloc_t)libc_getfunc(MALLOC_IDX))
+#define libc_realloc        ((realloc_t)libc_getfunc(REALLOC_IDX))
+#define libc_calloc         ((calloc_t)libc_getfunc(CALLOC_IDX))
+#define libc_free           ((free_t)libc_getfunc(FREE_IDX))
 #define libc_malloc_usable_size                                         \
-    ((malloc_usable_size_t)libc_funcs[MALLOC_USABLE_SIZE_IDX])
+    ((malloc_usable_size_t)libc_getfunc(MALLOC_USABLE_SIZE_IDX))
 // #define libcpp_throw_bad_alloc                                          \
-//     ((throw_t)libc_funcs[THROW_BAD_ALLOC_IDX])
+//     ((throw_t)libc_getfunc[THROW_BAD_ALLOC_IDX])
 
 extern int arch_prctl(int code, unsigned long *addr);
 
@@ -526,7 +540,6 @@ static size_t get_config(const char *name, size_t _default)
 /*
  * ReZZan initialization.
  */
-static void libc_init(void);
 static intptr_t callback(int cmd, ...)
 {
     return 0;
@@ -539,6 +552,7 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
     option_tty = isatty(STDERR_FILENO);
     uintptr_t gs;
     (void)syscall(SYS_disable);     // rr_disable();
+    libc_init();
     if (arch_prctl(ARCH_GET_GS, &gs) < 0)
         error("failed to read %%gs register: %s", strerror(errno));
     if (gs == 0x0)
@@ -610,8 +624,6 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
     rw_poison(&pool->t[0], 0);
     rw_poison(&pool->t[1], 0);
     pool_ptr++;
-
-    libc_init();
 
     option_inited = true;
 }
@@ -1004,6 +1016,19 @@ void *memcpy(void * restrict dst, const void * restrict src, size_t n)
     DEBUG("memcpy(%p,%p,%zu) = %p", dst, src, n, dst);
     return libc_memmove(dst, src, n);
 }
+void *__memcpy_chk(void * restrict dst, const void * restrict src, size_t n,
+    size_t dstsz)
+{
+    if (dstsz < n)
+        error("__memcpy_chk(%p,%p,%zu,%zu): destination size (%zu) too "
+            "small (%zu)", dst, src, n, dstsz, dstsz, n);
+    CHECK_RW_POISONED(dst, n, "__memcpy_chk(%p,%p,%zu,%zu)", dst, src, n,
+        dstsz);
+    CHECK_RW_POISONED(dst, n, "__memcpy_chk(%p,%p,%zu,%zu)", dst, src, n,
+        dstsz);
+    DEBUG("__memcpy_chk(%p,%p,%zu,%zu) = %p", dst, src, n, dstsz, dst);
+    return libc_memmove(dst, src, n);
+}
 void *memmove(void *dst, const void *src, size_t n)
 {
     // Note: src can be uninitialized
@@ -1012,10 +1037,32 @@ void *memmove(void *dst, const void *src, size_t n)
     DEBUG("memmove(%p,%p,%zu) = %p", dst, src, n, dst);
     return libc_memmove(dst, src, n);
 }
+void *__memmove_chk(void * restrict dst, const void * restrict src, size_t n,
+    size_t dstsz)
+{
+    if (dstsz < n)
+        error("__memmove_chk(%p,%p,%zu,%zu): destination size (%zu) too "
+            "small (%zu)", dst, src, n, dstsz, dstsz, n);
+    CHECK_RW_POISONED(dst, n, "__memmove_chk(%p,%p,%zu,%zu)", dst, src, n,
+        dstsz);
+    CHECK_RW_POISONED(dst, n, "__memmove_chk(%p,%p,%zu,%zu)", dst, src, n,
+        dstsz);
+    DEBUG("__memmove_chk(%p,%p,%zu,%zu) = %p", dst, src, n, dstsz, dst);
+    return libc_memmove(dst, src, n);
+}
 void *memset(void *dst, int c, size_t n)
 {
     CHECK_RW_POISONED(dst, n, "memset(%p,%d,%zu)", dst, c, n);
     DEBUG("memset(%p,%d,%zu) = %p", dst, c, n, dst);
+    return libc_memset(dst, c, n);
+}
+void *__memset_chk(void *dst, int c, size_t n, size_t dstsz)
+{
+    if (dstsz < n)
+        error("__memset_chk(%p,%d,%zu,%zu): destination size (%zu) too "
+            "small (%zu)", dst, c, n, dstsz, dstsz, n);
+    CHECK_RW_POISONED(dst, n, "__memset_chk(%p,%d,%zu,%zu)", dst, c, n, dstsz);
+    DEBUG("__memset_chk(%p,%d,%zu,%zu) = %p", dst, c, n, dstsz, dst);
     return libc_memset(dst, c, n);
 }
 size_t strlen(const char *str)
@@ -1037,7 +1084,20 @@ char *strcpy(char *dst, const char *src)
     CHECK_STR_POISONED(src, SIZE_MAX, "strcpy(%p,%p)", dst, src);
     size_t n = libc_strnlen(src, SIZE_MAX);
     CHECK_RW_POISONED(dst, n+1, "strcpy(%p,%p)", dst, src);
-    DEBUG("strcpy(%p,%p) = %p\n", dst, src, dst);
+    DEBUG("strcpy(%p,%p) = %p", dst, src, dst);
+    libc_memmove(dst, src, n+1);
+    return dst;
+}
+char *__strcpy_chk(char *dst, const char *src, size_t dstsz)
+{
+    CHECK_STR_POISONED(src, SIZE_MAX, "__strcpy_chk(%p,%p,%zu)", dst, src,
+        dstsz);
+    size_t n = libc_strnlen(src, SIZE_MAX);
+    if (dstsz < n+1)
+        error("__strcpy_chk(%p,%p,%zu): destination size (%zu) too "
+            "small (%zu)", dst, src, dstsz, dstsz, n+1);
+    CHECK_RW_POISONED(dst, n+1, "__strcpy_chk(%p,%p,%zu)", dst, src, dstsz);
+    DEBUG("__strcpy_chk(%p,%p,%zu) = %p", dst, src, dstsz, dst);
     libc_memmove(dst, src, n+1);
     return dst;
 }
@@ -1049,6 +1109,22 @@ char *strcat(char *dst, const char *src)
     size_t m = libc_strnlen(src, SIZE_MAX);
     CHECK_RW_POISONED(dst+n, m+1, "strcat(%p,%p)", dst, src);
     DEBUG("strcat(%p,%p) = %p", dst, src, dst);
+    libc_memmove(dst+n, src, m+1);
+    return dst;
+}
+char *__strcat_chk(char *dst, const char *src, size_t dstsz)
+{
+    CHECK_STR_POISONED(dst, SIZE_MAX, "__strcat_chk(%p,%p,%zu)", dst, src,
+        dstsz);
+    size_t n = libc_strnlen(dst, SIZE_MAX);
+    CHECK_STR_POISONED(src, SIZE_MAX, "__strcat_chk(%p,%p,%zu)", dst, src,
+        dstsz);
+    size_t m = libc_strnlen(src, SIZE_MAX);
+    if (dstsz < n+m+1)
+        error("__strcat_chk(%p,%p,%zu): destination size (%zu) too "
+            "small (%zu)", dst, src, dstsz, dstsz, n+m+1);
+    CHECK_RW_POISONED(dst+n, m+1, "__strcat_chk(%p,%p,%zu)", dst, src, dstsz);
+    DEBUG("__strcat_chk(%p,%p,%zu) = %p", dst, src, dstsz, dst);
     libc_memmove(dst+n, src, m+1);
     return dst;
 }
