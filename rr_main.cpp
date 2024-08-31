@@ -589,11 +589,11 @@ static intptr_t callback(int cmd, intptr_t arg)
     switch (cmd)
     {
         case COMMAND_ENABLE:
-            option_disabled++;
-            return option_disabled-1;
-        case COMMAND_DISABLE:
             option_disabled--;
             return option_disabled+1;
+        case COMMAND_DISABLE:
+            option_disabled++;
+            return option_disabled-1;
         default:
             error("unknown callback command (%d)", cmd);
     }

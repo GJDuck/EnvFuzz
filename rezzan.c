@@ -558,6 +558,7 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
 {
     if (option_inited)
         return;
+    option_inited = true;
 
     option_tty = isatty(STDERR_FILENO);
     uintptr_t gs;
@@ -634,8 +635,6 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
     rw_poison(&pool->t[0], 0);
     rw_poison(&pool->t[1], 0);
     pool_ptr++;
-
-    option_inited = true;
 }
 
 /*
