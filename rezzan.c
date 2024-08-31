@@ -167,6 +167,7 @@ enum
     STRNLEN_IDX,
     STRNCMP_IDX,
     STRNCASECMP_IDX,
+    STRCHR_IDX,
     STRRCHR_IDX,
     MALLOC_IDX,
     REALLOC_IDX,
@@ -186,6 +187,7 @@ static const char * const libc_names[] =
     [STRNLEN_IDX]            = "strnlen",
     [STRNCMP_IDX]            = "strncmp",
     [STRNCASECMP_IDX]        = "strncasecmp",
+    [STRCHR_IDX]             = "strchr",
     [STRRCHR_IDX]            = "strrchr",
     [MALLOC_IDX]             = "malloc",
     [REALLOC_IDX]            = "realloc",
@@ -227,6 +229,7 @@ static void *libc_getfunc(int idx)
 #define libc_strnlen        ((strnlen_t)libc_getfunc(STRNLEN_IDX))
 #define libc_strncmp        ((strncmp_t)libc_getfunc(STRNCMP_IDX))
 #define libc_strncasecmp    ((strncmp_t)libc_getfunc(STRNCASECMP_IDX))
+#define libc_strchr         ((strchr_t)libc_getfunc(STRCHR_IDX))
 #define libc_strrchr        ((strchr_t)libc_getfunc(STRRCHR_IDX))
 #define libc_malloc         ((malloc_t)libc_getfunc(MALLOC_IDX))
 #define libc_realloc        ((realloc_t)libc_getfunc(REALLOC_IDX))
@@ -492,7 +495,7 @@ static bool check_rd_poisoned(const void *ptr, size_t n)
             error("invalid read detected for " msg, ##__VA_ARGS__);         \
     }                                                                       \
     while (false)
-static bool check_str_poisoned(const char *str, size_t n)
+static bool check_str_poisoned(const char *str, size_t n, char terminal)
 {
     uintptr_t iptr = (uintptr_t)str;
     if (n == 0 || iptr < REZZAN_BASE || iptr > REZZAN_BASE + REZZAN_MAX)
@@ -505,7 +508,7 @@ static bool check_str_poisoned(const char *str, size_t n)
         uintptr_t iptr = (uintptr_t)str + i;
         if (iptr % sizeof(Token) == 0 && is_rd_poisoned((Token *)iptr))
             return true;
-        if (str[i] == '\0')
+        if (str[i] == terminal || str[i] == '\0')
             return false;
     }
     return false;
@@ -513,7 +516,14 @@ static bool check_str_poisoned(const char *str, size_t n)
 #define CHECK_STR_POISONED(str, n, msg, ...)                                \
     do                                                                      \
     {                                                                       \
-        if (check_str_poisoned((str), (n)))                                 \
+        if (check_str_poisoned((str), (n), '\0'))                           \
+            error("invalid read detected for " msg, ##__VA_ARGS__);         \
+    }                                                                       \
+    while (false)
+#define CHECK_STR_C_POISONED(str, n, c, msg, ...)                            \
+    do                                                                      \
+    {                                                                       \
+        if (check_str_poisoned((str), (n), (c)))                            \
             error("invalid read detected for " msg, ##__VA_ARGS__);         \
     }                                                                       \
     while (false)
@@ -1065,6 +1075,14 @@ void *__memset_chk(void *dst, int c, size_t n, size_t dstsz)
     DEBUG("__memset_chk(%p,%d,%zu,%zu) = %p", dst, c, n, dstsz, dst);
     return libc_memset(dst, c, n);
 }
+int memcmp(const void *s1, const void *s2, size_t n)
+{
+    CHECK_RD_POISONED(s1, n, "memcmp(%p,%p,%zu)", s1, s2, n);
+    CHECK_RD_POISONED(s2, n, "memcmp(%p,%p,%zu)", s1, s2, n);
+    int r = libc_memcmp(s1, s2, n);
+    DEBUG("memcmp(%p,%p,%zu) = %d", s1, s2, n, r);
+    return r;
+}
 size_t strlen(const char *str)
 {
     CHECK_STR_POISONED(str, SIZE_MAX, "strlen(%p)", str);
@@ -1145,9 +1163,38 @@ char *strncat(char *dst, const char *src, size_t n)
     CHECK_STR_POISONED(src, n, "strncat(%p,%p,%zu)", dst, src, n);
     size_t l = libc_strnlen(src, n);
     CHECK_RW_POISONED(dst+m, l+1, "strncat(%p,%p,%zu)", dst, src, n);
+    DEBUG("strncat(%p,%p,%zu) = %zu", dst, src, n, dst);
     libc_memmove(dst+n, src, l);
     dst[n+l] = '\0';
     return dst;
+}
+void *memchr(const void *s, int c, size_t n)
+{
+    CHECK_STR_C_POISONED(s, n, (char)c, "memchr(%p,%d,%zu)", s, c, n);
+    void *r = libc_memchr(s, c, n);
+    DEBUG("memchr(%p,%d,%zu) = %p", s, c, n, r);
+    return r;
+}
+void *memrchr(const void *s, int c, size_t n)
+{
+    CHECK_RD_POISONED(s, n, "memrchr(%p,%d,%zu)", s, c, n);
+    void *r = libc_memrchr(s, c, n);
+    DEBUG("memrchr(%p,%d,%zu) = %p", s, c, n, r);
+    return r;
+}
+char *strchr(const char *str, int c)
+{
+    CHECK_STR_C_POISONED(str, SIZE_MAX, (char)c, "strchr(%p,%d)", str, c);
+    char *r = libc_strchr(str, c);
+    DEBUG("strchr(%p,%d) = %p", str, c, r);
+    return r;
+}
+char *strrchr(const char *str, int c)
+{
+    CHECK_RD_POISONED(str, SIZE_MAX, "strrchr(%p,%d)", str, c);
+    char *r = libc_strrchr(str, c);
+    DEBUG("strrchr(%p,%d) = %p", str, c, r);
+    return r;
 }
 
 #if 0
