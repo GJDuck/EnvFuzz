@@ -106,6 +106,7 @@ static void record_init(char **argv, char **envp)
     pid_t pid = getpid();
     size_t size = sizeof(CONTEXT) + P.len();
     CONTEXT *ctx = (CONTEXT *)xmalloc(size);
+    memcpy(ctx->nonce, option_nonce, sizeof(ctx->nonce));
     ctx->cpu  = option_cpu;
     ctx->pid  = pid;
     ctx->fork = option_fork;

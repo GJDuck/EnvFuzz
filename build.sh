@@ -91,9 +91,11 @@ echo "./e9tool -M 'asm=\"syscall\"' -P 'replace entry(state)@rr_main' "$LIBC" -o
 echo -e "${GREEN}$0${OFF}: building env-fuzz..."
 make env-fuzz
 
-# STEP (4): compile rrCovPlugin.so
+# STEP (5): compile extra objects
 echo -e "${GREEN}$0${OFF}: building rrCovPlugin.so..."
 make rrCovPlugin.so
+echo -e "${GREEN}$0${OFF}: building rezzan.so..."
+make rezzan
 
 echo -e "${GREEN}$0${OFF}: done!"
 echo

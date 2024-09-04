@@ -34,7 +34,7 @@ struct QUEUE;
 struct RNG;
 struct PATCH;
 
-static bool option_disabled         = false;    // Record/replay disabled?
+static int option_disabled          = 0;        // Record/replay disabled?
 static bool option_debug            = false;    // Attach GDB?
 static size_t option_count          = 0;        // Max executions.
 static unsigned option_cpu          = 0;        // CPU number
@@ -52,6 +52,7 @@ static const char *option_filename  = NULL;     // Recording filename.
 static const char *option_patchname = NULL;     // Patch filename.
 static const char *option_outname   = NULL;     // Output dirname.
 static const char *option_install   = NULL;     // Install dir.
+static uint64_t option_nonce[2]     = {0};      // Random nonce.
 
 static SCHED *option_SCHED          = NULL;     // Recording to replay.
 static QUEUE *option_Q              = NULL;     // Local message queue.
@@ -84,17 +85,17 @@ void entry(void *arg)
     switch (state->rax)
     {   // Special enable/disable pseudo-syscalls
         case SYS_enable:
-            option_disabled = false;
+            option_disabled--;
             state->rax = 0;
             return;
         case SYS_disable:
-            option_disabled = true;
+            option_disabled++;
             state->rax = 0;
             return;
         default:
             break;
     }
-    if (option_disabled)
+    if (option_disabled > 0)
     {   // If disabled, just execute syscalls normally:
         long r = syscall(state->rax,
             state->rdi, state->rsi, state->rdx,
@@ -426,6 +427,7 @@ static void parse_config(void)
     close(CONFIG_FILENO);
 
     const CONFIG *config = (CONFIG *)buf;
+    memcpy(option_nonce, config->nonce, sizeof(option_nonce));
     option_debug    = config->debug;
     option_fuzz     = config->fuzz;
     option_hex      = config->hex;
@@ -555,7 +557,7 @@ void init(int argc, char **argv, char **envp)
         kill(getpid(), SIGSTOP);        // Wait for GDB to attach
     signal_init();
     ctl_init();
-    coverage_init(NULL, NULL);
+    interface_init(NULL, NULL);
     if (RECORD)
     {   // Record:
         thread_init();
@@ -576,6 +578,24 @@ void init(int argc, char **argv, char **envp)
         option_pcap = NULL;
         replay_init();
         fuzzer_main(nmsg);
+    }
+}
+
+/*
+ * RRFuzz external interface.
+ */
+static intptr_t callback(int cmd, intptr_t arg)
+{
+    switch (cmd)
+    {
+        case COMMAND_ENABLE:
+            option_disabled--;
+            return option_disabled+1;
+        case COMMAND_DISABLE:
+            option_disabled++;
+            return option_disabled-1;
+        default:
+            error("unknown callback command (%d)", cmd);
     }
 }
 

@@ -21,8 +21,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "rrCovPlugin.h"
-
 static bool option_fuzz     = false;    // Fuzzer is enabled?
 static int option_timeout   = 0;        // Fuzzer timeout.
 static int option_depth     = 0;        // Fuzzer max depth.
@@ -33,6 +31,7 @@ static bool option_blackbox = false;    // Blackbox mode?
 struct COVERAGE                 // Coverage bitmap
 {
     void (*callback)(intptr_t loc);
+    uint64_t nonce[2];          // Random nonce
     uint32_t prev_loc;          // prev_loc
     uint32_t mask;              // Mask
     uint8_t map[MAP_SIZE];      // Bits
@@ -75,9 +74,9 @@ struct FUZZER                   // The fuzzer state
     BRANCH *branches[];         // Per-branch state
 };
 
-static FUZZER *FUZZ = NULL;
-static COVERAGE *fuzzer_cov = NULL;
-static uint8_t *fuzzer_map  = NULL;     // Virgin bits
+static FUZZER *FUZZ          = NULL;
+static INTERFACE *fuzzer_cov = NULL;
+static uint8_t *fuzzer_map   = NULL;    // Virgin bits
 
 // Local fuzzer state:
 #define FUZZ_MAIN       0   // Outer
@@ -163,18 +162,20 @@ static void fuzzer_init(size_t nmsg, int timeout)
 }
 
 /*
- * Initialize fuzzer coverage.
+ * Initialize fuzzer interface.
  */
-static void coverage_init(COVERAGE *cov, uint8_t *map)
+static intptr_t callback(int cmd, intptr_t arg);
+static void interface_init(INTERFACE *I, uint8_t *map)
 {
-    static COVERAGE cov_0 = {0};
+    static INTERFACE I_0 = {0};
     static uint8_t map_0[MAP_SIZE] = {0};
-    cov = (cov == NULL? &cov_0: cov);
-    map = (map == NULL? map_0:  map);
-    cov->callback = NULL;
-    if (syscall(SYS_arch_prctl, /*ARCH_SET_GS=*/0x1001, cov) < 0)
+    I   = (I == NULL? &I_0: I);
+    map = (map == NULL? map_0: map);
+    I->callback = (CALLBACK)callback;
+    memcpy(I->nonce, option_nonce, sizeof(I->nonce));
+    if (syscall(SYS_arch_prctl, /*ARCH_SET_GS=*/0x1001, I) < 0)
         error("failed to set %%gs register: %s", strerror(errno));
-    fuzzer_cov = cov;
+    fuzzer_cov = I;
     fuzzer_map = map;
 }
 
@@ -209,11 +210,11 @@ static void fuzzer_main(size_t nmsg)
         return;
     fuzzer_init(nmsg, (option_timeout > 0? option_timeout: /*50ms=*/50));
     option_depth = (option_depth > 0? option_depth: 50);
-    COVERAGE *cov = (COVERAGE *)pmalloc(sizeof(COVERAGE));
-    memset(cov, 0x0, sizeof(*cov));
+    INTERFACE *I = (INTERFACE *)pmalloc(sizeof(INTERFACE));
+    memset(I, 0x0, sizeof(*I));
     uint8_t *map = (uint8_t *)pmalloc(MAP_SIZE);
     memset(map, 0x0, MAP_SIZE);
-    coverage_init(cov, map);
+    interface_init(I, map);
 
     // Misc. setup
     (void)setvbuf(stderr, NULL, _IOLBF, 0);
@@ -396,17 +397,17 @@ static bool fuzzer_calc_coverage(BRANCH *B)
     // index 0 is ignored, allowing cov->mask=0x0 to disable coverage
     if (!option_blackbox)
     {
-        fuzzer_cov->map[0] = 0x0;
+        fuzzer_cov->cov.map[0] = 0x0;
         for (size_t i = 1; i < MAP_SIZE; i++)
         {
-            uint8_t bit = bits[fuzzer_cov->map[i]];
+            uint8_t bit = bits[fuzzer_cov->cov.map[i]];
             cov |= (fuzzer_map[i] & bit) ^ bit;
             fuzzer_map[i] |= bit;
         }
-        FUZZ->out.coverage(fuzzer_cov->map, sizeof(fuzzer_cov->map));
+        FUZZ->out.coverage(fuzzer_cov->cov.map, sizeof(fuzzer_cov->cov.map));
     }
-    fuzzer_cov->prev_loc = 0x0;
-    memset(fuzzer_cov->map, 0x0, sizeof(fuzzer_cov->map));
+    fuzzer_cov->cov.prev_loc = 0x0;
+    memset(fuzzer_cov->cov.map, 0x0, sizeof(fuzzer_cov->cov.map));
     return (cov != 0x0);
 }
 
@@ -416,13 +417,13 @@ static bool fuzzer_calc_coverage(BRANCH *B)
 static uint32_t fuzzer_hash_coverage(void)
 {
     uint64_t h = 0x0;
-    uint64_t *map64 = (uint64_t *)fuzzer_cov->map;
+    uint64_t *map64 = (uint64_t *)fuzzer_cov->cov.map;
     for (size_t i = 0; i < MAP_SIZE / sizeof(uint64_t); i++)
     {
         h ^= hash(map64[i]);
         map64[i] = 0x0;
     }
-    fuzzer_cov->prev_loc = 0x0;
+    fuzzer_cov->cov.prev_loc = 0x0;
     return (uint32_t)h ^ (uint32_t)(h >> 32);
 }
 
@@ -461,7 +462,7 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
     FUZZ->patch->init();        // New patch to accumulate into
     FUZZ->replay = (replay->head == NULL? NULL: replay->head->next);
     FUZZ->rip    = NULL;
-    fuzzer_cov->mask = 0xFFFFFFFF;
+    fuzzer_cov->cov.mask = 0xFFFFFFFF;
 
     // Step (1): Fork-off the child process:
     FUZZER_LOCK();
@@ -551,7 +552,7 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
 
     bool good = fuzzer_save_interesting(B, K, FUZZ->patch, cov);
     FUZZ->patch = NULL;
-    fuzzer_cov->mask = 0x0;
+    fuzzer_cov->cov.mask = 0x0;
 
     size_t t = get_time() - FUZZ->time;
     t = (t == 0? 1: t);
@@ -594,11 +595,11 @@ static void fuzzer_syscall_callback(void)
     {
         case FUZZ_LEAF:
             fuzzer_syscall_depth++;
-            if (fuzzer_cov->mask != 0x0 &&
+            if (fuzzer_cov->cov.mask != 0x0 &&
                     fuzzer_syscall_depth >= /*MAX_COV=*/0)
-                fuzzer_cov->mask = 0x0; // Disable coverage after given depth
+                fuzzer_cov->cov.mask = 0x0; // Disable coverage after depth
             if (fuzzer_syscall_depth >= option_depth * 8)
-                exit(EXIT_FAILURE);     // Stuck in loop? -> boring, so exit
+                exit(EXIT_FAILURE);         // Stuck in loop? -> boring, so exit
             return;
         default:
             break;

@@ -27,14 +27,21 @@
 #define PCAP_FILENO             999
 #define CONFIG_FILENO           998
 
-#define ACTX                    250
+#define ACTX                    250     // CONTEXT structure
 
-#define FORK_CHILD              0
-#define FORK_PARENT             1
-#define FORK_FAIL               2
+#define SYS_enable              340     // Enable record&replay
+#define SYS_disable             341     // Disable record&replay
+
+#define FORK_CHILD              0       // fork() follows child
+#define FORK_PARENT             1       // fork() follows parent
+#define FORK_FAIL               2       // fork() fails
+
+#define MAP_SHIFT               14
+#define MAP_SIZE                (1ull << MAP_SHIFT)
 
 struct CONFIG                   // RRFuzz config
 {
+    uint64_t nonce[2];          // Random nonce.
     bool debug;                 // Attach debugger?
     bool fuzz;                  // Fuzz mode?
     bool hex;                   // Log output in hex?
@@ -54,8 +61,9 @@ struct CONFIG                   // RRFuzz config
     char strs[];                // String options
 };
 
-struct CONTEXT                  // Execution context/
+struct CONTEXT                  // Execution context
 {
+    uint64_t nonce[2];          // Random nonce.
     uint32_t cpu;               // Which CPU to run on.
     pid_t pid;                  // Process ID
     uint8_t fork;               // Fork-mode
@@ -64,5 +72,36 @@ struct CONTEXT                  // Execution context/
     uint32_t size;              // Size of args[]
     char args[];                // argv[] followed by envp[].
 };
+
+#define COMMAND_ENABLE          0   // Enable record&replay
+#define COMMAND_DISABLE         1   // Disable record&replay
+
+typedef intptr_t (*CALLBACK)(int cmd, ...);
+struct INTERFACE
+{
+    CALLBACK callback;
+    uint64_t nonce[2];
+    struct
+    {
+        uint32_t prev_loc;
+        uint32_t mask;
+        uint8_t map[MAP_SIZE];
+    } cov;
+};
+
+static inline CALLBACK rr_callback(void)
+{
+    CALLBACK r;
+    asm volatile ("mov %%gs:0x0,%0" : "=r"(r));
+    return r;
+}
+static inline void rr_enable(void)
+{
+    (void)(rr_callback())(COMMAND_ENABLE);
+}
+static inline void rr_disable(void)
+{
+    (void)(rr_callback())(COMMAND_DISABLE);
+}
 
 #endif

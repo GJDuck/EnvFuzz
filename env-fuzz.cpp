@@ -37,6 +37,7 @@
 #include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -790,6 +791,7 @@ int main(int argc, char **argv, char **envp)
     int option_timeout = 50, option_cpu = -1, option_emulate = -1,
         option_fork = FORK_CHILD;
     int64_t option_seed = 0;
+    uint64_t option_nonce[2];
     static const struct option long_options[] =
     {
         {"blackbox", no_argument,       nullptr, OPTION_BLACKBOX},
@@ -984,7 +986,13 @@ int main(int argc, char **argv, char **envp)
     if (option_record || option_replay || option_fuzz)
         option_cpu  = getCPU(ctx, option_cpu, lock_cpu);
     if (ctx != nullptr)
+    {
         option_fork = ctx->fork;
+        memcpy(option_nonce, ctx->nonce, sizeof(option_nonce));
+    }
+    else if (syscall(SYS_getrandom, option_nonce, sizeof(option_nonce), 0) <
+            (ssize_t)sizeof(option_nonce))
+        error("failed to generate random nonce: %s", strerror(errno));
 
     // Loop over the tasks
     for (const char *task: tasks)
@@ -1014,6 +1022,7 @@ int main(int argc, char **argv, char **envp)
             installdir.size()+1;
         uint8_t *buf = new uint8_t[size];
         CONFIG *config   = (CONFIG *)buf;
+        memcpy(config->nonce, option_nonce, sizeof(config->nonce));
         config->debug    = option_debug;
         config->fuzz     = option_fuzz;
         config->hex      = option_hex;

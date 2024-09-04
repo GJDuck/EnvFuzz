@@ -28,6 +28,7 @@
  */
 
 #include <cassert>
+#include <cstddef>
 
 #include <initializer_list>
 #include <map>
@@ -42,7 +43,7 @@
 
 using namespace e9tool;
 
-#include "rrCovPlugin.h"
+#include "rrfuzz.h"
 
 /*
  * Options.
@@ -209,7 +210,7 @@ extern void *e9_plugin_init(const Context *cxt)
     // ...                                  // Increment hitcount
     // movl $curr_loc1,%gs:prev_loc         // mov (curr_loc>>1),prev_loc
     //
-    int32_t offset = sizeof(void *);
+    int32_t offset = offsetof(INTERFACE, cov);
     code << 0x65 << ',' << 0x8b << ',' << 0x04 << ',' << 0x25 << ','
          << "{\"int32\":" << offset << "},";
     offset += sizeof(uint32_t);
