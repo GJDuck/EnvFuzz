@@ -554,6 +554,8 @@ static intptr_t callback(int cmd, ...)
 {
     return 0;
 }
+static int mem_check(const void *buf, size_t size, bool write);
+static int str_check(const char *str);
 void REZZAN_CONSTRUCTOR rezzan_init(void)
 {
     if (option_inited)
@@ -635,6 +637,9 @@ void REZZAN_CONSTRUCTOR rezzan_init(void)
     rw_poison(&pool->t[0], 0);
     rw_poison(&pool->t[1], 0);
     pool_ptr++;
+
+    (void)(rr_callback())(COMMAND_SET_MEM_CHECK, mem_check);
+    (void)(rr_callback())(COMMAND_SET_STR_CHECK, str_check);
 }
 
 /*
@@ -1190,10 +1195,24 @@ char *strchr(const char *str, int c)
 }
 char *strrchr(const char *str, int c)
 {
-    CHECK_RD_POISONED(str, SIZE_MAX, "strrchr(%p,%d)", str, c);
+    CHECK_STR_POISONED(str, SIZE_MAX, "strrchr(%p,%d)", str, c);
     char *r = libc_strrchr(str, c);
     DEBUG("strrchr(%p,%d) = %p", str, c, r);
     return r;
+}
+
+static int mem_check(const void *buf, size_t size, bool write)
+{
+    if (write)
+        CHECK_RW_POISONED(buf, size, "write_check(%p,%zu)", buf, size);
+    else
+        CHECK_RD_POISONED(buf, size, "read_check(%p,%zu)", buf, size);
+    return 0;
+}
+static int str_check(const char *str)
+{
+    CHECK_STR_POISONED(str, SIZE_MAX, "str_check(%p)", str);
+    return 0;
 }
 
 #if 0

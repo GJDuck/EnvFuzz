@@ -34,6 +34,9 @@ struct QUEUE;
 struct RNG;
 struct PATCH;
 
+typedef int (*mem_check_t)(const void *buf, size_t size, bool write);
+typedef int (*str_check_t)(const char *str);
+
 static int option_disabled          = 0;        // Record/replay disabled?
 static bool option_debug            = false;    // Attach GDB?
 static size_t option_count          = 0;        // Max executions.
@@ -53,6 +56,8 @@ static const char *option_patchname = NULL;     // Patch filename.
 static const char *option_outname   = NULL;     // Output dirname.
 static const char *option_install   = NULL;     // Install dir.
 static uint64_t option_nonce[2]     = {0};      // Random nonce.
+static mem_check_t option_mem_check = NULL;     // Memory error checker.
+static str_check_t option_str_check = NULL;     // String error checker.
 
 static SCHED *option_SCHED          = NULL;     // Recording to replay.
 static QUEUE *option_Q              = NULL;     // Local message queue.
@@ -586,6 +591,7 @@ void init(int argc, char **argv, char **envp)
  */
 static intptr_t callback(int cmd, intptr_t arg)
 {
+    intptr_t val;
     switch (cmd)
     {
         case COMMAND_ENABLE:
@@ -594,6 +600,14 @@ static intptr_t callback(int cmd, intptr_t arg)
         case COMMAND_DISABLE:
             option_disabled++;
             return option_disabled-1;
+        case COMMAND_SET_MEM_CHECK:
+            val = (intptr_t)option_mem_check;
+            option_mem_check = (mem_check_t)arg;
+            return val;
+        case COMMAND_SET_STR_CHECK:
+            val = (intptr_t)option_str_check;
+            option_str_check = (str_check_t)arg;
+            return val;
         default:
             error("unknown callback command (%d)", cmd);
     }

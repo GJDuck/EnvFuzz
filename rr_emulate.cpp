@@ -298,6 +298,38 @@ static int emulate_hook(STATE *state)
         goto emulate_exit;
     }
 
+    // External memory error checking API:
+    if (option_mem_check != NULL || option_str_check != NULL)
+    {
+        int n = syscall_arity(call);
+        for (int i = 0; i < n; i++)
+        {
+            uint8_t arg = info->args[i];
+            if (arg == ASTR)
+            {
+                if (option_str_check != NULL &&
+                        !option_str_check((char *)call->args[i].buf))
+                {
+                    call->result = -EFAULT;
+                    goto emulate_exit;
+                }
+                continue;
+            }
+            if (option_mem_check == NULL)
+                continue;
+            size_t size = 0;
+            uint8_t *buf = syscall_buf(call, i, &size);
+            if (buf == NULL || !syscall_used(call, i))
+                continue;
+            bool output = syscall_is_output(call, i);
+            if (!option_mem_check((void *)buf, size, /*write=*/!output))
+            {
+                call->result = -EFAULT;
+                goto emulate_exit;
+            }
+        }
+    }
+
     switch (call->no)
     {
         case SYS_open: case SYS_openat:

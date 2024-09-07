@@ -75,6 +75,8 @@ struct CONTEXT                  // Execution context
 
 #define COMMAND_ENABLE          0   // Enable record&replay
 #define COMMAND_DISABLE         1   // Disable record&replay
+#define COMMAND_SET_MEM_CHECK   2   // Set memory checker
+#define COMMAND_SET_STR_CHECK   3   // Set string checker
 
 typedef intptr_t (*CALLBACK)(int cmd, ...);
 struct INTERFACE
