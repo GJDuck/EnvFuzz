@@ -216,6 +216,7 @@ struct AUXVEC                   // Auxiliary data helper
 #define ASTK            62      // stack_t
 #define APRC            63      // prctl option
 #define APRA            64      // prctl arg
+#define ATMS            65      // tms
 // #define ACTX         250     // CONTEXT (see rrfuzz.h)
 #define ANAM            251     // Port name
 #define APTH            252     // Pathname
@@ -359,7 +360,7 @@ static const INFO TABLE[] =
     {"getrlimit",               0, 0, PROC, {ARES, ALIM, A___, A___, A___, A___}, RXXX, M_I____},
     {"getrusage",               0, 0, PROC, {AWHO, AUSE, A___, A___, A___, A___}, R__0, M_I____},
     {"sysinfo",                 0, 0, PINF, {ASYS, A___, A___, A___, A___, A___}, R__0, MI_____},
-    {"times",                   0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
+    {"times",                   0, 0, PINF, {ATMS, A___, A___, A___, A___, A___}, RDEC, MI_____},
     {"ptrace",                  0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
     {"getuid",                  0, 0, PXXX, {A___, A___, A___, A___, A___, A___}, RDEC, M______},
     {"syslog",                  0, 0, PXXX, {ANYI, A___, A___, A___, A___, A___}, RXXX, M______},
@@ -817,6 +818,13 @@ typedef struct sigaltstack
     int ss_flags;
     size_t ss_size;
 } stack_t;
+struct tms
+{
+    clock_t tms_utime;
+    clock_t tms_stime;
+    clock_t tms_cutime;
+    clock_t tms_cstime;
+};
 
 /*
  * Get syscall info.
@@ -908,6 +916,7 @@ static const char *arg_name(uint8_t arg)
         case ASTK: return "stack_t *";
         case APRC: return "prctl option";
         case APRA: return "prctl arg";
+        case ATMS: return "struct tms *";
         default: return "<unknown>";
     }
 }
@@ -924,7 +933,7 @@ static bool arg_is_pointer(uint8_t arg)
         case AMSG: case ABFP: case AUNM: case AENT: case AE64: case ASYS:
         case A_SA: case ASFS: case ALIM: case AUSE: case ASTX: case AC3A:
         case A_SI: case AEPE: case AEPA: case A_MM: case A_IA: case A_SS:
-        case ACPU: case ASTK: case AIOA:
+        case ACPU: case ASTK: case AIOA: case ATMS:
             return true;
         default:
             return false;
@@ -1143,6 +1152,7 @@ static uint8_t *syscall_buf(const SYSCALL *call, int i, size_t *size_ptr)
         case ACPU: size = prev; break;
         case ASTK: size = sizeof(stack_t); break;
         case APRA: size = prctl_info((int)prev)->size; break;
+        case ATMS: size = sizeof(struct tms); break;
         default: return NULL;
     }
     *size_ptr = size;

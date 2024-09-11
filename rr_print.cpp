@@ -1240,6 +1240,17 @@ static void print_prctl_arg(PRINTER &P, int cmd, intptr_t arg)
         P.format("%ld", arg);
 }
 
+static void print_tms(PRINTER &P, const struct tms *tms)
+{
+    if (tms == NULL)
+    {
+        P.put("NULL");
+        return;
+    }
+    P.format("{%ld,%ld,%ld,%ld}", tms->tms_utime, tms->tms_stime,
+        tms->tms_cutime, tms->tms_cstime);
+}
+
 static void print_context(PRINTER &P, const CONTEXT *ctx)
 {
     P.format("{cpu=%d,pid=%d,argv=[", ctx->cpu, ctx->pid);
@@ -1436,6 +1447,8 @@ static void print_arg(PRINTER &P, const INFO *info, uint8_t arg,
             print_prctl(P, (int)val); break;
         case APRA:
             print_prctl_arg(P, (int)prev, val); break;
+        case ATMS:
+            print_tms(P, (struct tms *)val); break;
         case ACTX:
             print_context(P, (CONTEXT *)val); break;
         default:
