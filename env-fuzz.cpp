@@ -157,7 +157,10 @@ static void parseELF(const char *filename, std::string &path,
                     if (candidate.size() == 0 || candidate.back() != '/')
                         candidate += '/';
                     candidate += filename;
-                    if (access(candidate.c_str(), X_OK) == 0)
+                    struct stat buf;
+                    if (stat(candidate.c_str(), &buf) == 0 &&
+                            (buf.st_mode & S_IXUSR) != 0 &&
+                            S_ISREG(buf.st_mode))
                     {
                         found = true;
                         path.swap(candidate);
@@ -1065,7 +1068,7 @@ int main(int argc, char **argv, char **envp)
         {
             // Prepare debugger (if necessary):
             std::string path, interp;
-            parseELF(progname.c_str(), path, interp);
+            parseELF(argv[0], path, interp);
             if (option_debug)
             {
                 child = fork();
