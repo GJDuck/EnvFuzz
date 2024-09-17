@@ -134,6 +134,17 @@ static void THREAD_LOCK(void)
 }
 
 /*
+ * Test if the thread lock is held.
+ */
+static bool THREAD_IS_LOCKED(void)
+{
+    if (mutex_trylock(&thread_mutex) < 0)
+        return (errno == EBUSY);
+    mutex_unlock(&thread_mutex);
+    return false;
+}
+
+/*
  * Thread start handling.
  */
 static void record_start(int id);
@@ -271,7 +282,7 @@ static NORETURN void thread_exit(STATE *state)
     THREAD *self = thread_self();
     if (self->ctid != NULL)
         *self->ctid = 0x0;
-    mutex_unlock(&thread_mutex);
+    THREAD_UNLOCK();
     xfree(self);
     syscall(SYS_exit, (int)state->rdi);
     while (true)
@@ -286,6 +297,6 @@ static void thread_init(void)
     INFO_pid = getpid();
     THREAD *self = thread_new(NULL);
     thread_set_self(self);
-    mutex_unlock(&thread_mutex);
+    THREAD_LOCK();
 }
 

@@ -284,7 +284,7 @@ static const INFO TABLE[] =
     {"access",                  0, 0, PINF, {ASTR, AOCT, A___, A___, A___, A___}, R__0, M______},
     {"pipe",                    0, 0, P_FD, {AFD2, A___, A___, A___, A___, A___}, R__0, MI_____},
     {"select",                  0, 1, POLL, {ADEC, ASET, ASET, ASET, A_TV, A___}, RSIZ, M_IIII_},
-    {"sched_yield",             0, 0, PTHR, {A___, A___, A___, A___, A___, A___}, R__0, M______},
+    {"sched_yield",             0, 1, PTHR, {A___, A___, A___, A___, A___, A___}, R__0, M______},
     {"mremap",                  1, 0, PMEM, {APTR, ASIZ, ASIZ, AHEX, ADDD, A___}, RPTR, M______},
     {"msync",                   0, 0, PMEM, {APTR, ASIZ, AHEX, A___, A___, A___}, R__0, M______},
     {"mincore",                 1, 0, PMEM, {APTR, ASIZ, APTR, A___, A___, A___}, R__0, M__I___},

@@ -387,7 +387,7 @@ static MSG *pcap_read(FILE *pcap, const char *filename, uint32_t *pkt_id,
         const struct ip6_hdr *ip6  = (struct ip6_hdr *)(ether + 1);
         if (ntohs(ether->h_proto) != ETH_P_IPV6)
             error("failed to parse packet (#%u) from \"%s\"; expected "
-                "IPv6 ethernet type (0x%.4X), found (%.4X)", *pkt_id,
+                "IPv6 ethernet type (0x%.4X), found (0x%.4X)", *pkt_id,
                 filename, ETH_P_IPV6, ntohs(ether->h_proto));
         bool outbound = false;
         if (memcmp(ether->h_source, src, ETH_ALEN) == 0 &&
