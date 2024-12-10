@@ -204,7 +204,7 @@ static int record_hook(STATE *state)
         case SYS_close:
             switch (call->arg0.fd)
             {
-                case PCAP_FILENO: case STDERR_FILENO:
+                case PCAP_FILENO: case ERROR_FILENO:
                     // Stop program closing useful fds
                     call->result = 0;
                     break;
@@ -394,8 +394,13 @@ static int record_hook(STATE *state)
             }
             goto handler;
         case SYS_close:
-            if (call->arg0.fd == PCAP_FILENO)
-                goto handler;
+            switch (call->arg0.fd)
+            {
+                case PCAP_FILENO: case ERROR_FILENO:
+                    goto handler;
+                default:
+                    break;
+            }
             pcap_write_close(pcap, call->arg0.fd);
             fd_close(call->arg0.fd);
             goto handler;

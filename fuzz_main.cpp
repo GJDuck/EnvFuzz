@@ -26,7 +26,7 @@ static int option_timeout   = 0;        // Fuzzer timeout.
 static int option_depth     = 0;        // Fuzzer max depth.
 static bool option_blackbox = false;    // Blackbox mode?
 
-#define PIPE_FILENO         997
+#define PIPE_FILENO         996
 
 struct COVERAGE                 // Coverage bitmap
 {
@@ -243,6 +243,7 @@ static void fuzzer_main(size_t nmsg)
             error("failed to fork child process: %s", strerror(errno));
         else if (child == 0)
         {
+            fprintf(stderr, "IN CHILD\n");
             close(fds[0]);
             if (dup2(fds[1], PIPE_FILENO) < 0)
                 error("failed to dup pipe: %s", strerror(errno));

@@ -504,6 +504,15 @@ void init(int argc, char **argv, char **envp)
     if (syscall(SYS_arch_prctl, /*ARCH_SET_CPUID=*/0x1012, 0x0) < 0)
         warning("failed to enable cpuid interception (replay may diverge): %s",
             strerror(errno));
+
+    // Duplicate stderr, in case the program closes/redirects it
+    if (dup2(STDERR_FILENO, ERROR_FILENO) < 0)
+        error("failed to duplicate stderr: %s", strerror(errno));
+    FILE *stream = fdopen(ERROR_FILENO, "w");
+    if (stream == NULL)
+        error("failed to open fd %d for writing: %s", ERROR_FILENO,
+            strerror(errno));
+    stderr = stream;
     (void)setvbuf(stderr, NULL, _IOLBF, 0);
 
     // Step (0): Patch VDSO

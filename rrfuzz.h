@@ -26,6 +26,7 @@
 
 #define PCAP_FILENO             999
 #define CONFIG_FILENO           998
+#define ERROR_FILENO            997
 
 #define ACTX                    250     // CONTEXT structure
 
