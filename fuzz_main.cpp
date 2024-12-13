@@ -243,7 +243,6 @@ static void fuzzer_main(size_t nmsg)
             error("failed to fork child process: %s", strerror(errno));
         else if (child == 0)
         {
-            fprintf(stderr, "IN CHILD\n");
             close(fds[0]);
             if (dup2(fds[1], PIPE_FILENO) < 0)
                 error("failed to dup pipe: %s", strerror(errno));
