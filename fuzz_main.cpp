@@ -105,23 +105,21 @@ static void fuzzer_unlock(const char *file, int line)
  */
 static const char *signal_name4(int sig)
 {
-    switch (sig)
+    static const char names[][5] =
     {
-        case SIGQUIT: return "QUIT";
-        case SIGILL:  return "ILL ";
-        case SIGABRT: return "ABRT";
-        case SIGFPE:  return "FPE ";
-        case SIGKILL: return "KILL";
-        case SIGSEGV: return "SEGV";
-        case SIGPIPE: return "PIPE";
-        case SIGALRM: return "ALRM";
-        case SIGTERM: return "TERM";
-        case SIGUSR1: return "USR1";
-        case SIGUSR2: return "USR2";
-        case SIGBUS:  return "BUS ";
-        case SIGTRAP: return "TRAP";
-        default:      return "SIG?";
-    }
+        "HUP ", "INT ", "QUIT", "ILL ", "TRAP", "BUS ", "ABRT", "FPE ",
+        "KILL", "USR1", "SEGV", "USR2", "PIPE", "ALRM", "TERM", "0016",
+        "CHLD", "CONT", "STOP", "0020", "0021", "0022", "0023", "0024",
+        "0025", "0026", "0027", "0028", "0029", "0030", "SYS ", "0032",
+        "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040",
+        "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
+        "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056",
+        "0057", "0058", "0059", "0060", "0061", "0062", "0063", "0064",
+    };
+    int idx = sig - 1;
+    if (idx < 0 || (size_t)idx >= sizeof(names) / sizeof(names[0]))
+        return "??? ";
+    return names[idx];
 }
 
 /*
