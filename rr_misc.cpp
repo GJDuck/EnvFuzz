@@ -487,3 +487,71 @@ static bool is_mapping_available(void *addr_0, size_t size)
     return !found;
 }
 
+/*
+ * Get a bug location as a string.
+ */
+static const char *get_bug_id(void *addr_0)
+{
+    uintptr_t addr = (uintptr_t)addr_0;
+    FILE *stream = fopen("/proc/self/maps", "r");
+    char *name = NULL;
+    if (stream == NULL)
+        goto no_name;
+    while (name == NULL)
+    {
+        uintptr_t lo, hi, offset;
+        if (fscanf(stream, "%lx-%lx %*4s %lx %*x:%*x %*d", &lo, &hi, &offset)
+                != 3)
+            break;
+        char c;
+        while ((c = getc(stream)) == ' ')
+            ;
+        if (c == '\n')
+            continue;
+        if (c == EOF)
+            break;
+        char buf[BUFSIZ+128];
+        buf[0] = c;
+        for (size_t i = 1; i < BUFSIZ; i++)
+        {
+            c = getc(stream);
+            if (c == '\n' || c == EOF)
+            {
+                buf[i] = '\0';
+                break;
+            }
+            buf[i] = c;
+        }
+        if (addr >= lo && addr < hi)
+        {
+            char *str = buf, *tmp;
+            size_t len = strlen(str);
+            if (str[0] == '[')
+            {
+                str[len-1] = '\0';
+                str++; len--;
+            }
+            while ((tmp = strchr(str, '/')) != NULL)
+            {
+                tmp++;
+                len -= (tmp - str);
+                str  = tmp;
+            }
+            offset += (addr - lo);
+            if (snprintf(str+len, 128, "+%zu", offset) < 0)
+                error("failed to print integer: %s", strerror(errno));
+            name = xstrdup(str);
+        }
+    }
+    fclose(stream);
+    if (name == NULL)
+    {
+    no_name:
+        char tmp[128];
+        if (snprintf(tmp, sizeof(tmp)-1, "%lx", addr) < 0)
+            error("failed to print integer: %s", strerror(errno));
+        name = xstrdup(tmp);
+    }
+    return name;
+}
+

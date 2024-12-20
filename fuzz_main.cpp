@@ -508,8 +508,7 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
     HASH K = FUZZ->out.hash(&B->in.tlsh, status);
     if (WIFSIGNALED(status))
     {
-        RNG rng((uint64_t)FUZZ->rip);
-        uint16_t bugid = (uint64_t)rng.rand();
+        const char *bugid = get_bug_id(FUZZ->rip);
         int sig = WTERMSIG(status);
         switch (sig)
         {
@@ -524,26 +523,27 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
         switch (sig)
         {
             case SIGABRT:
-                P.format("%s/abort/ABORT_%.4x_m%.5d.patch", option_outname,
+                P.format("%s/abort/ABORT_%s_m%.5d.patch", option_outname,
                     bugid, FUZZ->id);
                 FUZZ->aborts += patch_save(P.str(), FUZZ->patch);
                 break;
             case SIGTRAP:
-                P.format("%s/abort/%s_%.4x_m%.5d.patch", option_outname,
+                P.format("%s/abort/%s_%s_m%.5d.patch", option_outname,
                     signal_name(sig), bugid, FUZZ->id);
                 FUZZ->aborts += patch_save(P.str(), FUZZ->patch);
                 break;
             case SIGKILL:
-                P.format("%s/hang/HANG_%.4x_m%.5d.patch", option_outname,
+                P.format("%s/hang/HANG_%s_m%.5d.patch", option_outname,
                     bugid, FUZZ->id);
                 FUZZ->hangs += patch_save(P.str(), FUZZ->patch);
                 break;
             default:
-                P.format("%s/crash/%s_%.4x_m%.5d.patch", option_outname,
+                P.format("%s/crash/%s_%s_m%.5d.patch", option_outname,
                     signal_name(sig), bugid, FUZZ->id);
                 FUZZ->crashes += patch_save(P.str(), FUZZ->patch);
                 break;
         }
+        xfree((void *)bugid);
     }
     else if (WIFEXITED(status))
         fprintf(stderr, "%sEXIT%s", GREEN, OFF);
