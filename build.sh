@@ -84,7 +84,13 @@ echo "./e9tool -M 'asm=\"syscall\"' -P 'replace entry(state)@rr_main' "$LIBC" -o
     -M 'asm="rdtscp"' \
     -P 'replace rdtscp_hook(state)@rr_main' \
     -M 'addr=&"abort"' \
-    -P 'replace abort_hook()@rr_main' \
+    -P 'replace abort_hook(%rsp)@rr_main' \
+    -M 'addr=&"__assert"' \
+    -P 'assert_hook(%rsp)@rr_main' \
+    -M 'addr=&"__assert_fail"' \
+    -P 'assert_hook(%rsp)@rr_main' \
+    -M 'addr=&"__assert_perror_fail"' \
+    -P 'assert_hook(%rsp)@rr_main' \
     "$LIBC" -o "lib/libc.so.6" | tee "build.log"
 
 # STEP (4): compile env-fuzz:

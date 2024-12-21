@@ -220,15 +220,27 @@ void rdtscp_hook(void *arg)
 }
 
 /*
+ * __assert*() entry point.
+ */
+void assert_hook(uintptr_t rsp)
+{
+    // Save the caller address of an assert(...) failure.
+    if (option_fuzz && fuzzer_state == FUZZ_LEAF && FUZZ->rip == NULL)
+        FUZZ->rip = *(void **)rsp;
+}
+
+/*
  * abort() entry point.
  */
-void abort_hook(void)
+void abort_hook(uintptr_t rsp)
 {
     // Unexpected aborts should immediately generate a SIGABRT.  The glibc
     // version of abort() tends to call other syscalls first, which could
     // confuse the replay.
     SIGNAL_UNBLOCK(SIG_MASK(SIGABRT));
     if (RECORD) THREAD_UNLOCK();
+    if (option_fuzz && fuzzer_state == FUZZ_LEAF && FUZZ->rip == NULL)
+        FUZZ->rip = *(void **)rsp;
     abort();
 }
 
