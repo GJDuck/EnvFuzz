@@ -51,7 +51,11 @@ struct BRANCH                   // Per-branch state
 struct FUZZER                   // The fuzzer state
 {
     bool stop;                  // Stop fuzzing?
-    ssize_t count;              // Max executions
+    struct
+    {
+        ssize_t execs;          // Max executions
+        size_t time;            // Max time
+    } max;
 
     uint64_t time;              // Start time
     size_t execs;               // # executions
@@ -150,12 +154,13 @@ static void fuzzer_init(size_t nmsg, int timeout)
     memset(FUZZ, 0x0, size);
 
     mutex_init(&FUZZ->lock);
-    FUZZ->count    =
-        (option_count > INT64_MAX? INT64_MAX: (ssize_t)option_count);
-    FUZZ->stage    = 1;
-    FUZZ->timeout  = timeout;
-    FUZZ->leaf     = INT_MIN;
-    FUZZ->time     = get_time();
+    FUZZ->max.execs =
+        (option_max_execs > INT64_MAX? INT64_MAX: (ssize_t)option_max_execs);
+    FUZZ->max.time  = option_max_time;
+    FUZZ->stage     = 1;
+    FUZZ->timeout   = timeout;
+    FUZZ->leaf      = INT_MIN;
+    FUZZ->time      = get_time();
     FUZZ->out.reset();
 }
 
@@ -579,7 +584,10 @@ static MSG *fuzzer_fork(MSG *M, PATCH *replay)
         COLOR(FUZZ->aborts, YELLOW), FUZZ->aborts, OFF,
         COLOR(FUZZ->hangs, YELLOW), FUZZ->hangs, OFF,
         COLOR(good, GREEN), (uint64_t)(K >> 64), (uint64_t)K, OFF);
-    
+
+    if (t / 1000000 >= FUZZ->max.time)
+        FUZZ->stop = true;
+ 
     return NULL;
 }
 
@@ -648,7 +656,7 @@ static MSG *fuzzer_mutate(const ENTRY *E, MSG *M)
         P->load();
         for (size_t i = 0; !P->discard && i < FUZZ->stage; i++)
         {
-            FUZZ->stop = (FUZZ->count-- <= 0? true: FUZZ->stop);
+            FUZZ->stop = (FUZZ->max.execs-- <= 0? true: FUZZ->stop);
             if (FUZZ->stop)
                 exit(EXIT_FAILURE);
 

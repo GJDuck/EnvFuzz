@@ -39,7 +39,8 @@ typedef int (*str_check_t)(const char *str);
 
 static int option_disabled          = 0;        // Record/replay disabled?
 static bool option_debug            = false;    // Attach GDB?
-static size_t option_count          = 0;        // Max executions.
+static size_t option_max_execs      = 0;        // Max executions.
+static size_t option_max_time       = 0;        // Max time.
 static unsigned option_cpu          = 0;        // CPU number
 static FILE *option_pcap            = NULL;     // PCAP file
 static bool option_tty              = false;    // Print colors?
@@ -445,22 +446,23 @@ static void parse_config(void)
 
     const CONFIG *config = (CONFIG *)buf;
     memcpy(option_nonce, config->nonce, sizeof(option_nonce));
-    option_debug    = config->debug;
-    option_fuzz     = config->fuzz;
-    option_hex      = config->hex;
-    option_patch    = config->patch;
-    option_record   = config->record;
-    option_tty      = config->tty;
-    option_blackbox = config->blackbox;
-    option_save     = config->save;
-    option_log      = config->log;
-    option_emulate  = config->emulate;
-    option_depth    = config->depth;
-    option_count    = config->count;
-    option_cpu      = config->cpu;
-    option_timeout  = config->timeout;
-    option_seed     = config->seed;
-    option_fork     = config->fork;
+    option_debug     = config->debug;
+    option_fuzz      = config->fuzz;
+    option_hex       = config->hex;
+    option_patch     = config->patch;
+    option_record    = config->record;
+    option_tty       = config->tty;
+    option_blackbox  = config->blackbox;
+    option_save      = config->save;
+    option_log       = config->log;
+    option_emulate   = config->emulate;
+    option_depth     = config->depth;
+    option_max_execs = config->max_execs;
+    option_max_time  = config->max_time;
+    option_cpu       = config->cpu;
+    option_timeout   = config->timeout;
+    option_seed      = config->seed;
+    option_fork      = config->fork;
     const char *strs[4];
     size_t i = 0, n = (size_t)r - sizeof(CONFIG);
     for (size_t j = 0; j < sizeof(strs) / sizeof(strs[0]); j++)

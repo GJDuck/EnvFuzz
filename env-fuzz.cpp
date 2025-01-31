@@ -711,8 +711,6 @@ static void usage(const char *progname)
         "OPTIONS:\n"
         "\t--blackbox\n"
         "\t\tUse \"blackbox\" mode (no feedback)\n"
-        "\t--count N\n"
-        "\t\tRun for at most N executions\n"
         "\t--cpu CPU\n"
         "\t\tUse CPU number\n"
         "\t--debug, -d\n"
@@ -729,6 +727,10 @@ static void usage(const char *progname)
         "\t\tLog output as hexadecimal\n"
         "\t--log LEVEL\n"
         "\t\tSet the log LEVEL\n"
+        "\t--max-execs MAX\n"
+        "\t\tLimit fuzz campaign to MAX executions.\n"
+        "\t--max-time MAX\n"
+        "\t\tLimit fuzz campaign to MAX seconds.\n"
         "\t--out DIR, -o DIR\n"
         "\t\tSet the output directory to be DIR\n"
         "\t--pcap FILE\n"
@@ -765,6 +767,8 @@ enum OPTION
     OPTION_FUZZ,
     OPTION_HEX,
     OPTION_LOG,
+    OPTION_MAX_EXECS,
+    OPTION_MAX_TIME,
     OPTION_OUT,
     OPTION_PCAP,
     OPTION_PRELOAD,
@@ -788,35 +792,36 @@ int main(int argc, char **argv, char **envp)
          option_record = false, option_replay = false, option_reset = false,
          option_blackbox = false, option_save = false,
          option_instrument = false;
-    size_t option_count = SIZE_MAX;
     int8_t option_log = 1;
     uint16_t option_depth = 50;
     int option_timeout = 50, option_cpu = -1, option_emulate = -1,
         option_fork = FORK_CHILD;
     int64_t option_seed = 0;
     uint64_t option_nonce[2];
+    size_t option_max_execs = SIZE_MAX, option_max_time = SIZE_MAX;
     static const struct option long_options[] =
     {
-        {"blackbox", no_argument,       nullptr, OPTION_BLACKBOX},
-        {"count",    required_argument, nullptr, OPTION_COUNT},
-        {"cpu",      required_argument, nullptr, OPTION_CPU},
-        {"debug",    no_argument,       nullptr, OPTION_DEBUG},
-        {"depth",    required_argument, nullptr, OPTION_DEPTH},
-        {"dir",      required_argument, nullptr, OPTION_DIR},
-        {"emulate",  required_argument, nullptr, OPTION_EMULATE},
-        {"fork",     required_argument, nullptr, OPTION_FORK},
-        {"hex",      no_argument,       nullptr, OPTION_HEX},
-        {"log",      required_argument, nullptr, OPTION_LOG},
-        {"out",      required_argument, nullptr, OPTION_OUT},
-        {"pcap",     required_argument, nullptr, OPTION_PCAP},
-        {"preload",  required_argument, nullptr, OPTION_PRELOAD},
-        {"save",     no_argument,       nullptr, OPTION_SAVE},
-        {"seed",     required_argument, nullptr, OPTION_SEED},
-        {"timeout",  required_argument, nullptr, OPTION_TIMEOUT},
-        {"tty",      no_argument,       nullptr, OPTION_TTY},
-        {"help",     no_argument,       nullptr, OPTION_HELP},
-        {"version",  no_argument,       nullptr, OPTION_VERSION},
-        {nullptr,    no_argument,       nullptr, 0},
+        {"blackbox",  no_argument,       nullptr, OPTION_BLACKBOX},
+        {"cpu",       required_argument, nullptr, OPTION_CPU},
+        {"debug",     no_argument,       nullptr, OPTION_DEBUG},
+        {"depth",     required_argument, nullptr, OPTION_DEPTH},
+        {"dir",       required_argument, nullptr, OPTION_DIR},
+        {"emulate",   required_argument, nullptr, OPTION_EMULATE},
+        {"fork",      required_argument, nullptr, OPTION_FORK},
+        {"hex",       no_argument,       nullptr, OPTION_HEX},
+        {"log",       required_argument, nullptr, OPTION_LOG},
+        {"out",       required_argument, nullptr, OPTION_OUT},
+        {"max-execs", required_argument, nullptr, OPTION_MAX_EXECS},
+        {"max-time",  required_argument, nullptr, OPTION_MAX_TIME},
+        {"pcap",      required_argument, nullptr, OPTION_PCAP},
+        {"preload",   required_argument, nullptr, OPTION_PRELOAD},
+        {"save",      no_argument,       nullptr, OPTION_SAVE},
+        {"seed",      required_argument, nullptr, OPTION_SEED},
+        {"timeout",   required_argument, nullptr, OPTION_TIMEOUT},
+        {"tty",       no_argument,       nullptr, OPTION_TTY},
+        {"help",      no_argument,       nullptr, OPTION_HELP},
+        {"version",   no_argument,       nullptr, OPTION_VERSION},
+        {nullptr,     no_argument,       nullptr, 0},
     };
     while (true)
     {
@@ -828,10 +833,6 @@ int main(int argc, char **argv, char **envp)
         {
             case OPTION_BLACKBOX:
                 option_blackbox = true; break;
-            case OPTION_COUNT:
-                option_count = (size_t)parseInt(long_options[idx].name, optarg,
-                    1, INT64_MAX);
-                break;
             case OPTION_CPU:
                 option_cpu = (int)parseInt(long_options[idx].name, optarg,
                     0, UINT16_MAX);
@@ -864,6 +865,14 @@ int main(int argc, char **argv, char **envp)
                 break;
             case OPTION_OUT: case 'o':
                 option_outname = optarg; break;
+            case OPTION_MAX_EXECS:
+                option_max_execs = (size_t)parseInt(long_options[idx].name,
+                    optarg, 1, INT64_MAX);
+                break;
+            case OPTION_MAX_TIME:
+                option_max_time = (size_t)parseInt(long_options[idx].name,
+                    optarg, 1, INT64_MAX);
+                break;
             case OPTION_PCAP:
                 option_pcapname = optarg; break;
             case OPTION_PRELOAD:
@@ -1024,24 +1033,25 @@ int main(int argc, char **argv, char **envp)
             option_outname.size()+1   +
             installdir.size()+1;
         uint8_t *buf = new uint8_t[size];
-        CONFIG *config   = (CONFIG *)buf;
+        CONFIG *config    = (CONFIG *)buf;
         memcpy(config->nonce, option_nonce, sizeof(config->nonce));
-        config->debug    = option_debug;
-        config->fuzz     = option_fuzz;
-        config->hex      = option_hex;
-        config->patch    = option_patch;
-        config->record   = option_record;
-        config->tty      = option_tty;
-        config->blackbox = option_blackbox;
-        config->save     = option_save;
-        config->log      = option_log;
-        config->emulate  = option_emulate;
-        config->depth    = option_depth;
-        config->cpu      = option_cpu;
-        config->count    = option_count;
-        config->timeout  = option_timeout;
-        config->seed     = option_seed;
-        config->fork     = option_fork;
+        config->debug     = option_debug;
+        config->fuzz      = option_fuzz;
+        config->hex       = option_hex;
+        config->patch     = option_patch;
+        config->record    = option_record;
+        config->tty       = option_tty;
+        config->blackbox  = option_blackbox;
+        config->save      = option_save;
+        config->log       = option_log;
+        config->emulate   = option_emulate;
+        config->depth     = option_depth;
+        config->cpu       = option_cpu;
+        config->max_execs = option_max_execs;
+        config->max_time  = option_max_time;
+        config->timeout   = option_timeout;
+        config->seed      = option_seed;
+        config->fork      = option_fork;
         size_t i = 0;
         memcpy(config->strs+i, option_pcapname.c_str(), option_pcapname.size()+1);
         i += option_pcapname.size()+1;

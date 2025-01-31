@@ -58,7 +58,8 @@ struct CONFIG                   // RRFuzz config
     int32_t timeout;            // Fuzz timeout.
     uint16_t depth;             // Fuzz depth.
     uint16_t cpu;               // CPU number.
-    size_t count;               // Max executions.
+    size_t max_execs;           // Max executions.
+    size_t max_time;            // Max time.
     char strs[];                // String options
 };
 
